@@ -1,0 +1,40 @@
+# 파이프라인 설정 (src/pipeline). 항목 설명은 docs/PIPELINE.md
+
+# 데이터 출처. 지금은 개발용 기존 수집 데이터만 지원한다 (결과 수치는 보고하지 않는다)
+data_source: dev_legacy
+# 기존 데이터 폴더(kosdaq150_forecast/data). 비워 두면 환경변수 LEGACY_DATA_DIR(.env 가능)를 쓴다
+legacy_dir: null
+
+# 데이터 기준일. 이후 데이터는 잘라낸다 (CLAUDE.md 2.3)
+# 정식 값은 2025년 마지막 거래일 — 기존 데이터는 2024-12-30까지라 개발용으로 이 값을 쓴다
+as_of: "2024-12-30"
+
+# 고정 분할 (CLAUDE.md 4.1). 테스트 = val_end 다음 날 ~ as_of
+split:
+  train_end: "2022-12-31"
+  val_end: "2023-12-31"
+
+# 예측 기간 h (영업일). 분할 경계마다 h일씩 비운다 (CLAUDE.md 3장)
+horizons: [5, 22]
+
+# Yang–Zhang (CLAUDE.md 5.1, 5.3)
+yang_zhang:
+  # true  = 원래 정의: σo², σc²를 평균을 빼고 (n−1)로 나눈 표본분산
+  # false = 평균 0 가정: (1/n)·Σo², (1/n)·Σc²
+  demean: true
+
+# 편입 전후 5구간 (CLAUDE.md 4.3). [시작, 끝] 영업일 오프셋, 양 끝 포함
+# anchor announce = 공지일 기준, effective = 편입일 기준
+# announce_to_effective는 [공지일, 편입일 직전]으로 고정 (오프셋 없음)
+event_phases:
+  baseline:      {anchor: announce,  range: [-120, -61]}
+  anticipation:  {anchor: announce,  range: [-60, -1]}
+  short_shock:   {anchor: effective, range: [0, 21]}
+  post:          {anchor: effective, range: [22, 120]}
+
+# 공지일이 없을 때 임시 공지일 (개발용). effective = 편입일을 공지일로 쓴다 → announce_source: placeholder
+# 공지일 모듈(src/events/)이 생기면 그 값으로 바꾼다
+placeholder_announce: effective
+
+# 결과 저장 폴더 (레포 루트 기준, git 제외)
+out_dir: data/dev
