@@ -1,0 +1,31 @@
+# ── 데이터: 로컬에만 저장 (KRX 데이터 재배포 방지) ──
+# data/ 안에서는 MANIFEST와 README만 git으로 공유
+data/*
+!data/MANIFEST.csv
+!data/README.md
+
+# ── 비밀 정보 ──
+.env
+
+# ── 가상환경 ──
+.venv/
+venv/
+
+# ── Python 부산물 ──
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ── 노트북·실행 산출물 ──
+.ipynb_checkpoints/
+outputs/
+logs/
+
+# ── OS·에디터 ──
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Claude Code 개인 설정 ──
+.claude/settings.local.json

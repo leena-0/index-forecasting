@@ -1,0 +1,9 @@
+# 수집 단계(main) 공통 의존성 — 버전 고정은 requirements.txt에서
+requests
+pandas
+pyarrow
+python-dotenv
+pyyaml
+tqdm
+beautifulsoup4
+lxml
