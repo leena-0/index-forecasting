@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.etf_pdf.drift import build_daily_weights, load_openapi_values
 from src.etf_pdf.loader import (
     EtfPdfError,
     prepare_directory,
@@ -92,6 +93,103 @@ class EtfPdfTest(unittest.TestCase):
         self.assertTrue((out / "snapshots.parquet").exists())
         saved = json.loads((out / "meta.json").read_text(encoding="utf-8"))
         self.assertIn("not official index weights", saved["role"])
+
+
+class DailyWeightTest(unittest.TestCase):
+    def snapshots(self):
+        return pd.DataFrame(
+            {
+                "snapshot_date": pd.to_datetime(
+                    ["2022-01-03", "2022-01-03", "2022-01-05", "2022-01-05"]
+                ),
+                "ticker": ["000001", "000002", "000001", "000002"],
+                "equity_weight_pct": [60.0, 40.0, 50.0, 50.0],
+            }
+        )
+
+    def values(self):
+        return pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2022-01-03",
+                        "2022-01-03",
+                        "2022-01-04",
+                        "2022-01-04",
+                        "2022-01-05",
+                        "2022-01-05",
+                        "2022-01-06",
+                        "2022-01-06",
+                    ]
+                ),
+                "ticker": ["000001", "000002"] * 4,
+                "value": [100, 100, 110, 90, 200, 50, 180, 60],
+            }
+        )
+
+    def test_snapshot_reset_and_between_snapshot_drift(self):
+        daily, quality = build_daily_weights(
+            self.snapshots(), self.values(), "2022-01-06", "mcap"
+        )
+        by_key = daily.set_index(["date", "ticker"])
+        self.assertEqual(
+            by_key.loc[(pd.Timestamp("2022-01-03"), "000001"), "weight_pct"], 60.0
+        )
+        expected = 60 * 1.1 / (60 * 1.1 + 40 * 0.9) * 100
+        self.assertAlmostEqual(
+            by_key.loc[(pd.Timestamp("2022-01-04"), "000001"), "weight_pct"],
+            expected,
+        )
+        self.assertEqual(
+            by_key.loc[(pd.Timestamp("2022-01-05"), "000001"), "weight_pct"], 50.0
+        )
+        self.assertEqual(
+            by_key.loc[(pd.Timestamp("2022-01-05"), "000001"), "weight_source"],
+            "snapshot",
+        )
+        self.assertTrue(quality["complete"].all())
+        self.assertTrue((quality["weight_sum_pct"].round(10) == 100.0).all())
+
+    def test_missing_constituent_invalidates_whole_day(self):
+        values = self.values()
+        values.loc[
+            (values["date"] == "2022-01-04") & (values["ticker"] == "000002"),
+            "value",
+        ] = pd.NA
+        daily, quality = build_daily_weights(
+            self.snapshots(), values, "2022-01-06", "mcap"
+        )
+        bad = daily[daily["date"] == "2022-01-04"]
+        self.assertTrue(bad["weight_pct"].isna().all())
+        row = quality.set_index("date").loc[pd.Timestamp("2022-01-04")]
+        self.assertFalse(row["complete"])
+        self.assertEqual(row["missing_tickers"], 1)
+
+    def test_missing_anchor_value_raises(self):
+        values = self.values()
+        values.loc[
+            (values["date"] == "2022-01-03") & (values["ticker"] == "000002"),
+            "value",
+        ] = pd.NA
+        with self.assertRaisesRegex(EtfPdfError, "기준일"):
+            build_daily_weights(self.snapshots(), values, "2022-01-06", "mcap")
+
+    def test_loads_team_openapi_layout(self):
+        temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, temp)
+        folder = temp / "kosdaq_daily"
+        folder.mkdir()
+        pd.DataFrame(
+            {
+                "ISU_CD": ["1", "000002"],
+                "MKTCAP": ["1,000", "2,000"],
+                "TDD_CLSPRC": ["10", "20"],
+            }
+        ).to_parquet(folder / "date=20220103.parquet", index=False)
+        pd.DataFrame().to_parquet(folder / "date=20220104.parquet", index=False)
+        values = load_openapi_values(temp, "2022-01-03", "2022-01-04", "mcap")
+        self.assertEqual(values["ticker"].tolist(), ["000001", "000002"])
+        self.assertEqual(values["value"].tolist(), [1000, 2000])
 
 
 if __name__ == "__main__":
