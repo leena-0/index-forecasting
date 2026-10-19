@@ -23,7 +23,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 |---|---|
 | `targets_h{h}.parquet` | `ticker, origin_date, horizon, yz_var, split, embargo` — 종목·거래일마다 다음 h일의 Yang–Zhang 분산 |
 | `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev` |
-| `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약 |
+| `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약, **`reportable: false`와 `hold_reasons`** (구성종목·이벤트가 legacy이고 공지일이 임시값이라 최종 결과에 반영하지 않음) |
 
 모델이 쓸 수 있는 예측 행 = `yz_var`가 결측이 아니고 `embargo == False`.
 이벤트 구간 분석에 쓸 수 있는 행 = `complete == True` 이고 `crosses_split == False`.
@@ -37,7 +37,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 | `data_source` | `dev_legacy` | 데이터 어댑터. `dev_legacy`(기존 데이터만) / `openapi`(가격·지수는 Open API, 구성종목·이벤트는 기존 데이터) |
 | `legacy_dir` | `null` | 기존 데이터 폴더. `null`이면 환경변수 `LEGACY_DATA_DIR`. `openapi`에서도 구성종목·이벤트용으로 필요 |
 | `openapi_dir` | `data/raw/openapi` | Open API 수집 폴더 (`openapi`일 때) |
-| `corporate_action.gap_limit` | `0.30` | 수정 안 된 가격에서 가격 기준 변경일 판정: \|ln(시가/전일 종가)\| > ln(1 + 값) — 8절 |
+| `corporate_action.gap_limit` | `0.30` | 수정 안 된 가격에서 가격 기준 변경일 판정: ratio = 시가/전일 종가가 ratio > 1 + 값 또는 ratio < 1 − 값 (기본 1.3 / 0.7) — 8절 |
 | `corporate_action.shares_ratio` | `1.5` | 같은 판정: 상장주식수가 전일 대비 이 배수 이상(또는 역수 이하)으로 바뀐 날 |
 | `as_of` | `"2024-12-30"` | 데이터 기준일. 이후 데이터는 잘라낸다. 정식 값은 2025년 마지막 거래일이지만 기존 데이터가 2024-12-30까지다 |
 | `split.train_end` | `"2022-12-31"` | 학습 구간 끝 (CLAUDE.md 4.1) |
@@ -144,7 +144,7 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
   그날 KOSDAQ150 150종목이 모두 응답에 있음(현재 상장폐지된 16종목 포함 → 생존 편향 없음), 코스닥 150 지수 값이 기존 데이터와 같음.
 - 숫자 변환: 쉼표 제거, `""`·`"-"`는 결측. 거래정지(시가·고가·저가 0·결측 또는 거래량 0)는 OHLC·거래량 결측.
 - **가격 기준 변경일(`corp_action`)**: 가격이 수정되지 않았으므로 분할·무상증자 등으로 기준가가 바뀐 날의 야간 수익률은 실제 수익률이 아니다.
-  |ln(시가/전일 종가)|가 가격제한폭(±30%) 밖이거나 상장주식수가 1.5배 이상 바뀐 날을 표시하고, 그날이 들어간 타깃 구간은 결측으로 둔다
+  시가/전일 종가 비율이 1.3 초과 또는 0.7 미만(가격제한폭 ±30% 밖)이거나 상장주식수가 1.5배 이상 바뀐 날을 표시하고, 그날이 들어간 타깃 구간은 결측으로 둔다
   (DECISIONS.md 3.2의 "이벤트일 제외" 안을 보수적으로 적용). Yang–Zhang의 장중 항은 같은 날 가격 비율이라 영향이 없다.
   한계: 가격제한폭 안의 작은 기준가 조정(소규모 유상증자 권리락·배당락)은 잡지 못한다. 2015-06-15 이전 가격제한폭은 ±15%였다.
 - **이전 상장 종목**: 승인된 API는 코스닥뿐이라, 유가증권시장으로 옮긴 종목은 이전 이후 데이터가 없다. 그 구간은

@@ -97,10 +97,16 @@ def prepare(cfg):
     print(f"\n분할별 이벤트 {counts['events_by_split']}, 그중 윈도우가 경계를 넘어 제외 "
           f"{counts['events_crossing_split']}, 기준 구간이 직전 사후 구간과 겹침 {counts['baseline_overlaps_prev']}")
 
+    # 구성종목·이벤트가 아직 legacy(pykrx 자동 수집, 임시 공지일)이므로 어떤 data_source든 최종 결과에 반영하지 않는다
+    hold = ["구성종목·이벤트가 legacy(개발용) 데이터", "공지일이 임시값(편입일)"]
+    if cfg["data_source"] == "dev_legacy":
+        hold.append("가격도 legacy(네이버 수정주가)")
+    print(f"\n[보류] 최종 결과에 반영하지 않음: {', '.join(hold)}")
     meta = {"data_source": cfg["data_source"], "as_of": cfg["as_of"], "created_at": dt.datetime.now()
             .astimezone().isoformat(timespec="seconds"), "git_commit": git_commit(), "config": cfg,
             "versions": {"python": sys.version.split()[0], "pandas": pd.__version__, "numpy": np.__version__},
-            "counts": counts, "note": "개발용 데이터 — 결과 수치로 보고하지 않는다"}
+            "counts": counts, "members_source": "legacy", "announce_source": "placeholder",
+            "reportable": False, "hold_reasons": hold, "note": "개발용 — 결과 수치로 보고하지 않는다"}
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2, default=str),
                                        encoding="utf-8")
     print(f"\n저장: {out_dir}")

@@ -8,7 +8,8 @@ Open API가 제공하지 않으므로 당분간 기존 개발용 데이터(legac
   prices.corp_action   분할·증자 등으로 가격 기준이 바뀐 것으로 보이는 날 (True)
                        Open API 가격은 수정주가가 아니므로, 이날의 야간 수익률 ln(O_t / C_{t-1})은
                        실제 수익률이 아니다 → target.forward_yz가 이날이 들어간 타깃 구간을 결측으로 둔다.
-                       판정: |ln(O_t / C_{t-1})| > ln(1 + gap_limit)  (가격제한폭 ±30% 밖 = 기준가 조정)
+                       판정: ratio = O_t / C_{t-1}가 ratio > 1 + gap_limit 또는 ratio < 1 − gap_limit
+                             (가격제한폭 ±30% = 기준가의 0.7 ~ 1.3배 밖 = 기준가 조정)
                              또는 상장주식수 비율 ≥ shares_ratio 또는 ≤ 1/shares_ratio
   early_end            universe(구성종목 이력에 나온 종목) 중 코스닥 데이터가 as_of 전에 끝나는 종목
                        kind = moved(기존 데이터는 계속됨 → 유가증권 이전 상장 추정) / ended(같이 끝남 → 상장폐지 추정)
@@ -45,7 +46,8 @@ def flag_corp_actions(prices, gap_limit=0.30, shares_ratio=1.5):
     """종목별로 직전 행(직전 거래일)과 비교해 corp_action 열을 붙인다. prices는 ticker, date로 정렬돼 있어야 한다."""
     g = prices.groupby("ticker", sort=False)
     prev_close, prev_shares = g["close"].shift(1), g["shares"].shift(1)
-    gap = np.log(prices["open"] / prev_close).abs() > np.log(1 + gap_limit)
+    ratio = prices["open"] / prev_close
+    gap = (ratio > 1 + gap_limit) | (ratio < 1 - gap_limit)  # 기본 ratio > 1.3 또는 ratio < 0.7
     ratio = prices["shares"] / prev_shares
     jump = (ratio >= shares_ratio) | (ratio <= 1 / shares_ratio)
     return prices.assign(corp_action=(gap | jump).fillna(False).astype(bool))

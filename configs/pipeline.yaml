@@ -11,7 +11,8 @@ legacy_dir: null
 # Open API 수집 폴더 (data_source: openapi일 때)
 openapi_dir: data/raw/openapi
 # 수정 안 된 가격(openapi)에서 분할·증자 등 가격 기준이 바뀐 날 판정 → 그날이 들어간 타깃 구간은 결측
-#   |ln(시가 / 전일 종가)| > ln(1 + gap_limit)  (가격제한폭 ±30% 밖)  또는  상장주식수 비율 ≥ shares_ratio(또는 ≤ 역수)
+#   ratio = 시가 / 전일 종가 가 ratio > 1 + gap_limit 또는 ratio < 1 − gap_limit (기본 1.3 / 0.7, 가격제한폭 ±30% 밖)
+#   또는  상장주식수 비율 ≥ shares_ratio(또는 ≤ 역수)
 corporate_action:
   gap_limit: 0.30
   shares_ratio: 1.5

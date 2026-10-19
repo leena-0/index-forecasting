@@ -319,6 +319,31 @@ class OpenApiAdapterTest(unittest.TestCase):
             self.load()
 
 
+class CorpActionRuleTest(unittest.TestCase):
+    """판정: ratio = 시가 / 전일 종가, ratio > 1.3 또는 ratio < 0.7 (경계값은 포함하지 않음)."""
+
+    def flags(self, opens, shares=None):
+        n = len(opens) + 1
+        p = pd.DataFrame({"ticker": "A", "date": pd.bdate_range("2022-01-03", periods=n),
+                          "open": [100.0] + list(opens), "close": 100.0,
+                          "shares": shares if shares is not None else [1000.0] * n})
+        return openapi.flag_corp_actions(p)["corp_action"].tolist()[1:]  # 전일 종가는 모두 100
+
+    def test_price_ratio_bounds(self):
+        opens = [131, 130, 129, 71, 70, 69, 75]
+        self.assertEqual(self.flags(opens), [True, False, False, False, False, True, False])
+        # 0.75: 이전 기준(|ln ratio| > ln 1.3, 하한 ≈ 0.769)에서는 걸렸지만 새 기준에서는 가격제한폭 안이라 걸리지 않음
+
+    def test_shares_ratio_still_applies(self):
+        self.assertEqual(self.flags([100, 100], shares=[1000.0, 1000.0, 1600.0]), [False, True])
+
+    def test_custom_gap_limit(self):
+        p = pd.DataFrame({"ticker": "A", "date": pd.bdate_range("2022-01-03", periods=2),
+                          "open": [100.0, 116.0], "close": 100.0, "shares": 1.0})
+        self.assertTrue(openapi.flag_corp_actions(p, gap_limit=0.15)["corp_action"].iloc[1])  # 2015-06 이전 ±15%
+        self.assertFalse(openapi.flag_corp_actions(p)["corp_action"].iloc[1])
+
+
 class CorpActionTargetTest(unittest.TestCase):
     def test_corp_action_day_windows_are_nan(self):
         cal = pd.bdate_range("2022-01-03", periods=60)
