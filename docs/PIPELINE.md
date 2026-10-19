@@ -112,19 +112,30 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
 
 ```bash
 # .env: KRX_OPENAPI_KEY(인증키), COLLECTOR_ID
-.venv/Scripts/python -m src.krxapi collect --limit 5   # 시험: 처음 5평일
-.venv/Scripts/python -m src.krxapi collect             # 전체 (하루 한도에 닿으면 멈춤 → 다음 날 다시 실행하면 이어 받음)
-.venv/Scripts/python -m src.krxapi verify
+.venv/Scripts/python -m src.krxapi collect --date 2015-07-13  # 시험: 하루만
+.venv/Scripts/python -m src.krxapi collect --limit 5          # 시험: 처음 5평일
+.venv/Scripts/python -m src.krxapi collect                    # 전체 (하루 한도에 닿으면 멈춤 → 다음 날 다시 실행하면 이어 받음)
+.venv/Scripts/python -m src.krxapi validate --complete        # 저장된 파일 검사 (네트워크 없음)
+.venv/Scripts/python -m src.krxapi verify                     # MANIFEST 해시 대조
 ```
 
-- 설정 `configs/krxapi.yaml`: `as_of`(2025-12-30, [미확인]), `start`, `sleep_sec`(0.5), `max_calls`(9,500 — 키당 하루 10,000건)
+- 설정 `configs/krxapi.yaml`: `as_of`(2025-12-30, [미확인]), `start`, `sleep_sec`(0.5), `retries`(3), `daily_limit`(9,500 — 키당 하루 10,000건)
 - 순서: 평일마다 지수 → `코스닥 150` 행이 있는 날(거래일)마다 종목 → 달마다 마지막 거래일에 종목기본정보.
-  휴장일은 0행 지수 파일로 남겨 다시 요청하지 않는다. 종목기본정보는 과거 날짜로 조회하면 그날 상장돼 있던 종목 전체
-  (나중에 상장폐지된 종목 포함)가 오고 상장일은 바뀌지 않으므로 월 1회면 충분하다 (한 달 안에 상장·폐지된 종목만 빠질 수 있음).
-  거래일인데 종목 응답이 비면 실패로 기록하고 다시 실행할 때 그날만 받는다. 끝나면 연도별 평일 휴장 수를 출력한다(KRX 휴장일과 대조).
-- 저장: `data/raw/openapi/{kosdaq_index|kosdaq_daily|kosdaq_basic}/date=YYYYMMDD.parquet` (원본 문자열), `progress.jsonl`, `MANIFEST.csv`, `snapshot.json`
+  - **휴장일 판정**: 지수가 비면 종목 API도 비었는지 확인해야 휴장일로 본다. 휴장일은 0행 지수·종목 파일로 남겨 다시 요청하지 않는다.
+    지수만 비고 종목 데이터가 있으면 실패로 기록한다. 끝나면 연도별 평일 휴장 수를 출력한다(KRX 휴장일과 대조).
+  - 종목기본정보는 과거 날짜로 조회하면 그날 상장돼 있던 종목 전체(나중에 상장폐지된 종목 포함)가 오고 상장일은 바뀌지 않으므로
+    월 1회면 충분하다 (한 달 안에 상장·폐지된 종목만 빠질 수 있음).
+- **응답 검증** (실패하면 파일을 만들지 않고, 다시 실행하면 그 단위만 받는다): 필수 열, `BAS_DD == 요청일`,
+  종목코드(`ISU_CD`, `ISU_SRT_CD`) 빈 값·중복, `코스닥 150` 행이 정확히 1개, 거래일인데 0행.
+- **`validate`**: 휴장일 표시 파일 짝, 거래일 종목 파일 존재·검증, 거래가 있던 종목의 OHLC 관계(저가 ≤ 시가·종가 ≤ 고가,
+  거래정지 행 제외), 월말 종목기본 파일. `--complete`는 모든 평일 지수 파일이 있는지도 본다.
+- **호출 수**: `data/_state/openapi-requests-YYYY-MM-DD.json`에 날짜별로 누적한다. 같은 날 여러 번 실행해도 합산해 `daily_limit`에서 멈춘다.
+  429(요청 제한)도 그날 수집을 멈춘다. 종료 코드: 0 정상 / 1 실패한 단위 있음 / 2 한도·요청 제한으로 멈춤.
 - 401 `Unauthorized Key` = 키 문제, `Unauthorized API Call` = 그 API 이용신청이 승인되지 않음 → 재시도하지 않고 멈춘다.
-- 요청 수: 2015-01 ~ 2025-12 평일 약 2,870 + 거래일 약 2,710 + 월말 132 ≈ 5,700건 (하루 안에 가능)
+  네트워크 오류·5xx·JSON이 아닌 응답은 최대 `retries`회 재시도한다.
+- 저장: `data/raw/openapi/{kosdaq_index|kosdaq_daily|kosdaq_basic}/date=YYYYMMDD.parquet` (원본 문자열), `progress.jsonl`, `MANIFEST.csv`, `snapshot.json`
+- 요청 수: 2015-01 ~ 2025-12 평일 약 2,870 + 거래일 약 2,710 + 휴장일 확인 약 160 + 월말 132 ≈ 5,900건 (하루 안에 가능)
+- 휴장일 이중 확인, 응답 검증, `validate`, 날짜별 호출 수 기록, 429 처리, `--date`는 이나영 님 수집기(`topic/krx-openapi`의 `src/crawl`)에서 가져왔다.
 
 **어댑터에서 처리하는 것**
 

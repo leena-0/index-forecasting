@@ -1,4 +1,5 @@
 """src.krxapi(수집)와 src.pipeline.openapi(어댑터) 단위 테스트 — 가짜 클라이언트·가짜 Session, 네트워크 없음."""
+import datetime as dt
 import shutil
 import tempfile
 import unittest
@@ -8,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from src.krxapi import collect
-from src.krxapi.client import ApiError, DailyLimit, OpenApiClient
+from src.krxapi.client import ApiError, DailyLimit, OpenApiClient, RequestBudget
 from src.krxapi.store import SnapshotMismatch, Store
 from src.pipeline import openapi
 from src.pipeline.target import forward_yz
@@ -16,32 +17,49 @@ from tests.test_pipeline import make_legacy
 
 CFG = {"as_of": "2015-01-09", "start": "2015-01-01"}
 HOLIDAYS = {"20150101"}
+WEEKDAYS = ["20150101", "20150102", "20150105", "20150106", "20150107", "20150108", "20150109"]
+
+
+def idx_row(d, name):
+    return {"BAS_DD": d, "IDX_NM": name, "OPNPRC_IDX": "1", "HGPRC_IDX": "1", "LWPRC_IDX": "1",
+            "CLSPRC_IDX": "1,000.5", "ACC_TRDVOL": "1", "ACC_TRDVAL": "1"}
+
+
+def daily_row(d, code="000001", o="100", h="110", l="90", c="105", v="10"):
+    return {"BAS_DD": d, "ISU_CD": code, "ISU_NM": "가", "TDD_OPNPRC": o, "TDD_HGPRC": h, "TDD_LWPRC": l,
+            "TDD_CLSPRC": c, "ACC_TRDVOL": v, "ACC_TRDVAL": "1", "MKTCAP": "1", "LIST_SHRS": "1"}
+
+
+class FakeBudget:
+    def used(self):
+        return 0
 
 
 class FakeApi:
-    """endpoint별로 정해 둔 응답. 휴장일 지수는 빈 응답."""
+    """endpoint별로 정해 둔 응답. 휴장일은 지수·종목 모두 빈 응답. override[(endpoint, 날짜)] = 응답."""
 
-    def __init__(self, empty_daily=(), raise_on=None):
+    def __init__(self, override=None, raise_on=None):
         self.calls = 0
         self.log = []
-        self.empty_daily = set(empty_daily)
+        self.override = override or {}
         self.raise_on = raise_on
+        self.budget = FakeBudget()
 
     def get(self, endpoint, bas_dd):
         self.calls += 1
         self.log.append((endpoint, bas_dd))
         if self.raise_on and self.raise_on[0] == endpoint and bas_dd >= self.raise_on[1]:
             raise self.raise_on[2]
-        if endpoint == collect.INDEX_EP:
-            if bas_dd in HOLIDAYS:
-                return []
-            return [{"BAS_DD": bas_dd, "IDX_NM": "코스닥", "CLSPRC_IDX": "600"},
-                    {"BAS_DD": bas_dd, "IDX_NM": "코스닥 150", "CLSPRC_IDX": "1,000.5"}]
-        if endpoint == collect.BASIC_EP:
-            return [{"ISU_SRT_CD": "000001", "LIST_DD": "20100104"}]
-        if bas_dd in self.empty_daily:
+        if (endpoint, bas_dd) in self.override:
+            return self.override[(endpoint, bas_dd)]
+        if bas_dd in HOLIDAYS and endpoint != collect.BASIC_EP:
             return []
-        return [{"BAS_DD": bas_dd, "ISU_CD": "000001", "TDD_CLSPRC": "100"}]
+        if endpoint == collect.INDEX_EP:
+            return [idx_row(bas_dd, "코스닥"), idx_row(bas_dd, "코스닥 150")]
+        if endpoint == collect.BASIC_EP:
+            return [{"ISU_CD": "KR7000001", "ISU_SRT_CD": "000001", "ISU_NM": "가", "LIST_DD": "20100104",
+                     "LIST_SHRS": "1"}]
+        return [daily_row(bas_dd)]
 
 
 class CollectorTest(unittest.TestCase):
@@ -50,23 +68,41 @@ class CollectorTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         self.store = Store(self.tmp, "tester")
 
-    def run_c(self, api, limit=None, cfg=CFG):
-        return collect.Collector(api, self.store, cfg, log=lambda *_: None).run(limit=limit)
+    def run_c(self, api, limit=None, cfg=CFG, only_date=None):
+        return collect.Collector(api, self.store, cfg, log=lambda *_: None).run(limit=limit, only_date=only_date)
 
     def files(self, kind):
-        return sorted(p.stem for p in (self.tmp / "raw/openapi" / kind).glob("*.parquet"))
+        return sorted(p.stem[5:] for p in (self.tmp / "raw/openapi" / kind).glob("*.parquet"))
 
     def test_holidays_and_trading_days(self):
         api = FakeApi()
-        trading = self.run_c(api)
-        weekdays = ["20150101", "20150102", "20150105", "20150106", "20150107", "20150108", "20150109"]
-        self.assertEqual(self.files("kosdaq_index"), [f"date={d}" for d in weekdays])
-        self.assertEqual(trading, weekdays[1:])
-        self.assertEqual(self.files("kosdaq_daily"), [f"date={d}" for d in weekdays[1:]])
-        self.assertNotIn((collect.DAILY_EP, "20150101"), api.log)          # 휴장일 종목 요청 안 함
-        self.assertEqual(len(self.store.read("raw/openapi/kosdaq_index/date=20150101.parquet")), 0)
-        self.assertTrue(all(d <= "20150109" for _, d in api.log))            # as_of 이후 요청 안 함
-        self.assertEqual(self.files("kosdaq_basic"), ["date=20150109"])        # 달마다 마지막 거래일
+        self.assertEqual(self.run_c(api), 0)
+        self.assertEqual(self.files("kosdaq_index"), WEEKDAYS)
+        self.assertEqual(self.files("kosdaq_daily"), WEEKDAYS)                 # 휴장일은 0행 표시 파일
+        self.assertEqual(len(self.store.read("raw/openapi/kosdaq_daily/date=20150101.parquet")), 0)
+        self.assertIn((collect.DAILY_EP, "20150101"), api.log)                  # 휴장일 이중 확인
+        self.assertTrue(all(d <= "20150109" for _, d in api.log))               # as_of 이후 요청 안 함
+        self.assertEqual(self.files("kosdaq_basic"), ["20150109"])              # 달마다 마지막 거래일
+        self.assertEqual(collect.validate_files(self.store, CFG, complete=True), [])
+
+    def test_empty_index_but_stock_data_is_failure(self):
+        api = FakeApi(override={(collect.INDEX_EP, "20150106"): []})
+        self.assertEqual(self.run_c(api), 1)
+        self.assertNotIn("20150106", self.files("kosdaq_index"))
+        self.assertNotIn("20150106", self.files("kosdaq_daily"))
+
+    def test_response_checks(self):
+        bad = {(collect.DAILY_EP, "20150105"): [daily_row("20150102")],                       # 다른 날짜
+               (collect.DAILY_EP, "20150106"): [daily_row("20150106"), daily_row("20150106")],  # 종목코드 중복
+               (collect.DAILY_EP, "20150107"): [],                                              # 거래일 0행
+               (collect.INDEX_EP, "20150108"): [idx_row("20150108", "코스닥")]}                 # 코스닥 150 없음
+        self.assertEqual(self.run_c(FakeApi(override=bad)), 1)
+        self.assertEqual(self.files("kosdaq_daily"), ["20150101", "20150102", "20150109"])
+        api = FakeApi()
+        self.assertEqual(self.run_c(api), 0)                                    # 다시 실행 → 실패한 것만
+        self.assertEqual(sorted(api.log), sorted([(collect.INDEX_EP, "20150108"), (collect.DAILY_EP, "20150105"),
+                                                  (collect.DAILY_EP, "20150106"), (collect.DAILY_EP, "20150107"),
+                                                  (collect.DAILY_EP, "20150108")]))
 
     def test_rerun_skips(self):
         self.run_c(FakeApi())
@@ -74,20 +110,13 @@ class CollectorTest(unittest.TestCase):
         self.run_c(api)
         self.assertEqual(api.calls, 0)
 
-    def test_empty_trading_day_is_failure_and_retried(self):
-        self.run_c(FakeApi(empty_daily={"20150106"}))
-        self.assertNotIn("date=20150106", self.files("kosdaq_daily"))
-        api = FakeApi()
-        self.run_c(api)
-        self.assertEqual(api.log, [(collect.DAILY_EP, "20150106")])
-
-    def test_daily_limit_stops_and_writes_manifest(self):
-        with self.assertRaises(DailyLimit):
-            self.run_c(FakeApi(raise_on=(collect.DAILY_EP, "20150107", DailyLimit("한도"))))
-        self.assertEqual(self.files("kosdaq_daily"), ["date=20150102", "date=20150105", "date=20150106"])
+    def test_daily_limit_returns_2_and_resumes(self):
+        code = self.run_c(FakeApi(raise_on=(collect.DAILY_EP, "20150107", DailyLimit("한도"))))
+        self.assertEqual(code, 2)
+        self.assertEqual(self.files("kosdaq_daily"), ["20150101", "20150102", "20150105", "20150106"])
         self.assertTrue(self.store.manifest_path.exists())
         api = FakeApi()
-        self.run_c(api)  # 다음 날 다시 실행 → 남은 날만
+        self.assertEqual(self.run_c(api), 0)  # 다음 날 다시 실행 → 남은 것만
         self.assertEqual(api.log, [(collect.DAILY_EP, "20150107"), (collect.DAILY_EP, "20150108"),
                                    (collect.DAILY_EP, "20150109"), (collect.BASIC_EP, "20150109")])
 
@@ -101,18 +130,40 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(collect.month_ends(["20150129", "20150130", "20150202", "20150227", "20150302"]),
                          ["20150130", "20150227", "20150302"])
 
-    def test_limit_and_snapshot(self):
+    def test_limit_date_and_snapshot(self):
         self.run_c(FakeApi(), limit=3)
-        self.assertEqual(self.files("kosdaq_index"), ["date=20150101", "date=20150102", "date=20150105"])
+        self.assertEqual(self.files("kosdaq_index"), ["20150101", "20150102", "20150105"])
+        self.run_c(FakeApi(), only_date="2015-01-08")
+        self.assertIn("20150108", self.files("kosdaq_daily"))
+        with self.assertRaises(ValueError):
+            self.run_c(FakeApi(), only_date="2015-01-10")                       # 토요일
         with self.assertRaises(SnapshotMismatch):
             self.run_c(FakeApi(), cfg={**CFG, "as_of": "2015-01-08"})
 
+    def test_validate_finds_problems(self):
+        self.run_c(FakeApi())
+        (self.tmp / "raw/openapi/kosdaq_daily/date=20150105.parquet").unlink()
+        pd.DataFrame([daily_row("20150106", l="120")]).to_parquet(              # 저가 > 고가
+            self.tmp / "raw/openapi/kosdaq_daily/date=20150106.parquet")
+        pd.DataFrame([daily_row("20150107", o="0", h="0", l="0", c="99", v="0")]).to_parquet(  # 거래정지 행은 OK
+            self.tmp / "raw/openapi/kosdaq_daily/date=20150107.parquet")
+        (self.tmp / "raw/openapi/kosdaq_index/date=20150108.parquet").unlink()
+        issues = collect.validate_files(self.store, CFG, complete=True)
+        text = "\n".join(issues)
+        self.assertIn("20150105: 거래일 종목 파일 없음", text)
+        self.assertIn("20150106: OHLC 관계 오류", text)
+        self.assertNotIn("20150107", text)
+        self.assertIn("평일 지수 파일 1개 누락", text)
+        self.assertEqual(len(issues), 3)
+
 
 class FakeResp:
-    def __init__(self, status, data):
-        self.status_code, self._data = status, data
+    def __init__(self, status, data, headers=None):
+        self.status_code, self._data, self.headers = status, data, headers or {}
 
     def json(self):
+        if isinstance(self._data, Exception):
+            raise self._data
         return self._data
 
     def raise_for_status(self):
@@ -130,9 +181,14 @@ class FakeSession:
 
 
 class ClientTest(unittest.TestCase):
-    def client(self, resps, **kw):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def client(self, resps, limit=100, today=lambda: dt.date(2026, 10, 19)):
         s = FakeSession(resps)
-        return OpenApiClient("KEY", sleep_sec=0, session_factory=lambda: s, **kw), s
+        budget = RequestBudget(self.tmp, limit=limit, today=today)
+        return OpenApiClient("KEY", budget, sleep_sec=0, session_factory=lambda: s), s
 
     def test_ok_and_request_shape(self):
         c, s = self.client([FakeResp(200, {"OutBlock_1": [{"a": "1"}]})])
@@ -148,17 +204,29 @@ class ClientTest(unittest.TestCase):
             c.get("sto/ksq_bydd_trd", "20150102")
         self.assertEqual(c.calls, 1)
 
-    def test_5xx_retried(self):
-        c, _ = self.client([FakeResp(503, {}), FakeResp(200, {"OutBlock_1": []})])
-        self.assertEqual(c.get("idx/kosdaq_dd_trd", "20150101"), [])  # 503 뒤 1초 쉬고 재시도
-        self.assertEqual(c.calls, 2)
+    def test_429_stops(self):
+        c, _ = self.client([FakeResp(429, {}, {"Retry-After": "3600"})] * 3)
+        with self.assertRaisesRegex(DailyLimit, "429"):
+            c.get("x", "1")
+        self.assertEqual(c.calls, 1)
 
-    def test_max_calls(self):
-        c, _ = self.client([FakeResp(200, {"OutBlock_1": []})] * 3, max_calls=2)
-        c.get("x", "1")
-        c.get("x", "2")
+    def test_5xx_and_bad_json_retried(self):
+        c, _ = self.client([FakeResp(503, {}), FakeResp(200, ValueError("html")), FakeResp(200, {"OutBlock_1": []})])
+        self.assertEqual(c.get("idx/kosdaq_dd_trd", "20150101"), [])  # 재시도 사이 1초, 2초 쉼
+        self.assertEqual(c.calls, 3)
+
+    def test_budget_is_shared_across_runs_and_resets_by_day(self):
+        c1, _ = self.client([FakeResp(200, {"OutBlock_1": []})] * 2, limit=3)
+        c1.get("x", "1")
+        c1.get("x", "2")
+        c2, _ = self.client([FakeResp(200, {"OutBlock_1": []})] * 2, limit=3)   # 같은 날 다시 실행
+        c2.get("x", "3")
         with self.assertRaises(DailyLimit):
-            c.get("x", "3")
+            c2.get("x", "4")
+        self.assertEqual(c2.budget.used(), 3)
+        c3, _ = self.client([FakeResp(200, {"OutBlock_1": []})], limit=3, today=lambda: dt.date(2026, 10, 20))
+        c3.get("x", "5")                                                          # 다음 날은 새로 셈
+        self.assertEqual(c3.budget.used(), 1)
 
 
 class OpenApiAdapterTest(unittest.TestCase):
