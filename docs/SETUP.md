@@ -72,6 +72,8 @@ cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
 (macOS/Linux는 `.venv/bin/python`.) 수집 설정은 `configs/krxapi.yaml`, 결과는 `data/`(git 제외)에 저장된다.
 자세한 동작은 `docs/PIPELINE.md` 8절.
 
+ETF PDF 월말 원본 검증·표준화는 `docs/ETF_PDF.md`를 따른다. CSV를 XLSX로 변환하지 않고 두 형식을 그대로 읽는다.
+
 **기준일이 다른 데이터를 섞지 않는다**: `data/raw/openapi/snapshot.json`의 `as_of`·`start`·`source`가 config와 다르면
 수집을 거부한다. 처음부터 다시 받으려면 `data/raw/openapi`, `data/_state`, `data/MANIFEST.csv`를 지우고 실행한다.
 
