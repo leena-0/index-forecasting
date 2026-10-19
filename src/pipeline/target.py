@@ -16,6 +16,8 @@ h일 구간(i = 1, …, n, n = h)에 대해
 타깃(origin t) = 구간 t+1 ~ t+h의 σYZ² (일 단위 분산). o_1에는 t의 종가가 들어간다.
 구간 안에 결측(거래정지, 상장 전, 데이터 끝)이 하나라도 있으면 NaN — 보간하지 않는다.
 거래정지 다음 날은 직전 종가가 없으므로 o가 NaN이 되어, 그날이 들어간 구간도 NaN이다.
+prices에 corp_action 열이 있으면(수정 안 된 가격, openapi 어댑터) 그날의 o도 NaN으로 두어
+분할·증자로 가격 기준이 바뀐 날이 들어간 구간을 결측으로 처리한다.
 """
 import numpy as np
 import pandas as pd
@@ -43,6 +45,8 @@ def forward_yz(prices, calendar, h, demean=True):
         days = calendar[(calendar >= g.index[0]) & (calendar <= g.index[-1])]
         g = g.reindex(days)
         o = np.log(g["open"] / g["close"].shift(1))
+        if "corp_action" in g:  # 수정 안 된 가격: 가격 기준이 바뀐 날의 야간 수익률은 쓰지 않는다
+            o = o.mask(g["corp_action"].fillna(False).astype(bool))
         c = np.log(g["close"] / g["open"])
         u = np.log(g["high"] / g["open"])
         d = np.log(g["low"] / g["open"])

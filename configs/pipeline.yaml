@@ -1,9 +1,20 @@
 # 파이프라인 설정 (src/pipeline). 항목 설명은 docs/PIPELINE.md
 
-# 데이터 출처. 지금은 개발용 기존 수집 데이터만 지원한다 (결과 수치는 보고하지 않는다)
+# 데이터 출처
+#   dev_legacy = 기존 수집 데이터만 (가격은 네이버 수정주가)
+#   openapi    = 가격·지수는 KRX Open API(data/raw/openapi, python -m src.krxapi collect),
+#                구성종목·이벤트는 기존 데이터 — Open API가 구성종목을 주지 않음
+# 어느 쪽이든 구성종목이 기존 개발용 데이터라 결과 수치는 보고하지 않는다
 data_source: dev_legacy
 # 기존 데이터 폴더(kosdaq150_forecast/data). 비워 두면 환경변수 LEGACY_DATA_DIR(.env 가능)를 쓴다
 legacy_dir: null
+# Open API 수집 폴더 (data_source: openapi일 때)
+openapi_dir: data/raw/openapi
+# 수정 안 된 가격(openapi)에서 분할·증자 등 가격 기준이 바뀐 날 판정 → 그날이 들어간 타깃 구간은 결측
+#   |ln(시가 / 전일 종가)| > ln(1 + gap_limit)  (가격제한폭 ±30% 밖)  또는  상장주식수 비율 ≥ shares_ratio(또는 ≤ 역수)
+corporate_action:
+  gap_limit: 0.30
+  shares_ratio: 1.5
 
 # 데이터 기준일. 이후 데이터는 잘라낸다 (CLAUDE.md 2.3)
 # 정식 값은 2025년 마지막 거래일 — 기존 데이터는 2024-12-30까지라 개발용으로 이 값을 쓴다

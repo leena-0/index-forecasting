@@ -205,33 +205,39 @@ class EventPhaseTest(unittest.TestCase):
         self.assertFalse(ph.loc[(2, "baseline"), "baseline_overlaps_prev"])
 
 
+def make_legacy(d):
+    """기존 데이터 폴더(kosdaq150_forecast/data) 구조를 흉내 낸 작은 폴더 (종목 000001, 000002, 2015-07-13~16)."""
+    (d / "raw/aie_history/stocks").mkdir(parents=True)
+    (d / "raw/stocks").mkdir(parents=True)
+    (d / "processed").mkdir()
+    days = ["2015-07-13", "2015-07-14", "2015-07-15", "2015-07-16"]
+    pd.DataFrame({"date": days, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "value": 1,
+                  "mktcap": 1}).to_csv(d / "raw/index_2203.csv", index=False)
+    pd.DataFrame({"date": days, "open": [10, 0, 11, 12], "high": [11, 0, 12, 13], "low": [9, 0, 10, 11],
+                  "close": [10, 10, 11, 12], "volume": [5, 0, 6, 7], "chg_pct": 0}).to_csv(
+        d / "raw/aie_history/stocks/000001.csv", index=False)
+    pd.DataFrame({"date": days[2:], "open": 20, "high": 21, "low": 19, "close": 20, "volume": [1, 0],
+                  "chg_pct": 0}).to_csv(d / "raw/stocks/000002.csv", index=False)  # 07-16: 거래량 0
+    pd.DataFrame({"date": [d.replace("-", "") for d in days] * 2,
+                  "ticker": ["000001"] * 4 + ["000002"] * 4, "mcap": 100, "shares": 10}).to_csv(
+        d / "raw/aie_history/mcap_daily.csv", index=False)
+    pd.DataFrame({"date": ["20150713", "20150714", "20150715", "20150715", "20150716"],
+                  "ticker": ["000001", "000001", "000001", "000002", "000002"]}).to_csv(
+        d / "raw/aie_history/snapshots_2203.csv", index=False)
+    pd.DataFrame({"ticker": ["000001", "000002", "000001"],
+                  "event_type": ["initial", "regular_add", "regular_del"],
+                  "effective_date": ["2015-07-13", "2015-07-15", "2015-07-16"],
+                  "listing_date": "", "announce_date": ""}).to_csv(d / "processed/events.csv", index=False)
+
+
+
 class LegacyTest(unittest.TestCase):
     """기존 데이터 폴더 구조를 흉내 낸 작은 폴더로 어댑터를 확인한다."""
 
     def setUp(self):
         self.d = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.d)
-        (self.d / "raw/aie_history/stocks").mkdir(parents=True)
-        (self.d / "raw/stocks").mkdir(parents=True)
-        (self.d / "processed").mkdir()
-        days = ["2015-07-13", "2015-07-14", "2015-07-15", "2015-07-16"]
-        pd.DataFrame({"date": days, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "value": 1,
-                      "mktcap": 1}).to_csv(self.d / "raw/index_2203.csv", index=False)
-        pd.DataFrame({"date": days, "open": [10, 0, 11, 12], "high": [11, 0, 12, 13], "low": [9, 0, 10, 11],
-                      "close": [10, 10, 11, 12], "volume": [5, 0, 6, 7], "chg_pct": 0}).to_csv(
-            self.d / "raw/aie_history/stocks/000001.csv", index=False)
-        pd.DataFrame({"date": days[2:], "open": 20, "high": 21, "low": 19, "close": 20, "volume": [1, 0],
-                      "chg_pct": 0}).to_csv(self.d / "raw/stocks/000002.csv", index=False)  # 07-16: 거래량 0
-        pd.DataFrame({"date": [d.replace("-", "") for d in days] * 2,
-                      "ticker": ["000001"] * 4 + ["000002"] * 4, "mcap": 100, "shares": 10}).to_csv(
-            self.d / "raw/aie_history/mcap_daily.csv", index=False)
-        pd.DataFrame({"date": ["20150713", "20150714", "20150715", "20150715", "20150716"],
-                      "ticker": ["000001", "000001", "000001", "000002", "000002"]}).to_csv(
-            self.d / "raw/aie_history/snapshots_2203.csv", index=False)
-        pd.DataFrame({"ticker": ["000001", "000002", "000001"],
-                      "event_type": ["initial", "regular_add", "regular_del"],
-                      "effective_date": ["2015-07-13", "2015-07-15", "2015-07-16"],
-                      "listing_date": "", "announce_date": ""}).to_csv(self.d / "processed/events.csv", index=False)
+        make_legacy(self.d)
 
     def test_load(self):
         data = legacy.load(self.d, "2015-07-15")

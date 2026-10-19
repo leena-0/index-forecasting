@@ -1,0 +1,9 @@
+# KRX Open API 수집 설정 (src/krxapi). as_of·start가 기존 data/raw/openapi/snapshot.json과 다르면 실행을 거부한다.
+
+# 데이터 기준일 = 2025년 마지막 거래일. [미확인] KRX 휴장일 캘린더로 확정 (2025-12-31 연말 휴장 가정)
+as_of: "2025-12-30"
+start: "2015-01-01"
+
+data_dir: data      # 레포 루트 기준 (git 제외)
+sleep_sec: 0.5      # 요청 간 대기(초). 공식 API지만 순차로 천천히 보낸다
+max_calls: 9500     # 이번 실행 호출 상한 (키당 하루 10,000건)

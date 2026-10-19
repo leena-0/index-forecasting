@@ -20,7 +20,7 @@ import pandas as pd
 import yaml
 from dotenv import load_dotenv
 
-from . import legacy
+from . import legacy, openapi
 from .target import forward_yz
 from .windows import assign_splits, event_phases, summarize
 
@@ -38,12 +38,27 @@ def git_commit():
 
 
 def prepare(cfg):
-    if cfg["data_source"] != "dev_legacy":
-        raise ValueError(f"지원하지 않는 data_source: {cfg['data_source']}")
     legacy_dir = cfg.get("legacy_dir") or os.environ.get("LEGACY_DATA_DIR")
-    if not legacy_dir:
+    if not legacy_dir:  # openapi도 구성종목·이벤트는 기존 데이터에서 가져온다
         sys.exit("configs/pipeline.yaml의 legacy_dir 또는 환경변수 LEGACY_DATA_DIR를 설정하세요.")
-    data = legacy.load(legacy_dir, cfg["as_of"], cfg["placeholder_announce"])
+    counts = {}
+    if cfg["data_source"] == "dev_legacy":
+        data = legacy.load(legacy_dir, cfg["as_of"], cfg["placeholder_announce"])
+    elif cfg["data_source"] == "openapi":
+        ca = cfg["corporate_action"]
+        data = openapi.load(REPO / cfg["openapi_dir"], legacy_dir, cfg["as_of"], cfg["placeholder_announce"],
+                            ca["gap_limit"], ca["shares_ratio"])
+        universe = set(data["members"]["ticker"])
+        data["prices"] = data["prices"][data["prices"]["ticker"].isin(universe)].reset_index(drop=True)
+        ee = data["early_end"]
+        counts["corp_action_days"] = int(data["prices"]["corp_action"].sum())
+        counts["early_end"] = ee["kind"].value_counts().to_dict()
+        counts["moved_tickers"] = ee.loc[ee["kind"] == "moved", "ticker"].tolist()
+        print(f"[openapi] 구성종목·이벤트는 기존 데이터({data['members_until'].date()}까지), "
+              f"가격 기준 변경일 표시 {counts['corp_action_days']}건, "
+              f"코스닥 데이터가 일찍 끝나는 종목 {counts['early_end']} (moved = 유가증권 이전 상장 추정)")
+    else:
+        raise ValueError(f"지원하지 않는 data_source: {cfg['data_source']}")
     cal, prices, events = data["calendar"], data["prices"], data["events"]
 
     bad = legacy.check_events(events, data["members"], cal)
@@ -52,7 +67,7 @@ def prepare(cfg):
 
     out_dir = REPO / cfg["out_dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    counts = {"events": len(events), "events_mismatch": len(bad)}
+    counts.update({"events": len(events), "events_mismatch": len(bad)})
     for h in cfg["horizons"]:
         t = assign_splits(forward_yz(prices, cal, h, cfg["yang_zhang"]["demean"]), cal, cfg["split"])
         usable = t["yz_var"].notna() & ~t["embargo"]
@@ -73,6 +88,12 @@ def prepare(cfg):
     counts["events_by_split"] = ev_split.groupby("split").size().to_dict()
     counts["events_crossing_split"] = ev_split[ev_split["crosses_split"]].groupby("split").size().to_dict()
     counts["baseline_overlaps_prev"] = int(ev_split["baseline_overlaps_prev"].sum())
+    if "moved_tickers" in counts:  # 이전 상장 종목: 코스닥 데이터가 끝난 뒤 구간은 "종목 데이터 기간 밖"으로 제외됨
+        mv = ph[ph["ticker"].isin(counts["moved_tickers"])]
+        out_mv = mv[mv["reason"] == "종목 데이터 기간 밖"]
+        counts["moved_excluded_phases"] = out_mv.groupby(["direction", "phase"]).size().rename("n")             .reset_index().to_dict("records")
+        print(f"이전 상장 추정 {len(counts['moved_tickers'])}종목의 이벤트 {mv['event_id'].nunique()}건 중 "
+              f"코스닥 데이터 밖이라 제외된 구간 {len(out_mv)}개: {counts['moved_excluded_phases']}")
     print(f"\n분할별 이벤트 {counts['events_by_split']}, 그중 윈도우가 경계를 넘어 제외 "
           f"{counts['events_crossing_split']}, 기준 구간이 직전 사후 구간과 겹침 {counts['baseline_overlaps_prev']}")
 
