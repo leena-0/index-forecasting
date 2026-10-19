@@ -13,6 +13,7 @@ Open API가 제공하지 않으므로 당분간 기존 개발용 데이터(legac
   early_end            universe(구성종목 이력에 나온 종목) 중 코스닥 데이터가 as_of 전에 끝나는 종목
                        kind = moved(기존 데이터는 계속됨 → 유가증권 이전 상장 추정) / ended(같이 끝남 → 상장폐지 추정)
   index                코스닥 150 지수 일별 (date, open, high, low, close, volume, value, mcap)
+  listing              종목별 상장일 (ticker, list_date) — 월말 종목기본정보(kosdaq_basic)에서
 """
 from pathlib import Path
 
@@ -97,5 +98,14 @@ def load(openapi_dir, legacy_dir, as_of, placeholder_announce="effective", gap_l
             rows.append({"ticker": t, "kosdaq_last": kl, "legacy_last": ll, "kind": kind})
     early_end = pd.DataFrame(rows, columns=["ticker", "kosdaq_last", "legacy_last", "kind"])
 
+    basic = [pd.read_parquet(p, columns=["ISU_SRT_CD", "LIST_DD"]) for _, p in _read_dates(d / "kosdaq_basic", as_of)]
+    if basic:
+        b = pd.concat(basic, ignore_index=True).drop_duplicates()
+        b = b[b["LIST_DD"].astype(str).str.strip() != ""]
+        listing = (b.assign(list_date=pd.to_datetime(b["LIST_DD"], format="%Y%m%d"))
+                   .groupby("ISU_SRT_CD")["list_date"].min().rename_axis("ticker").reset_index())
+    else:
+        listing = pd.DataFrame(columns=["ticker", "list_date"])
+
     return {"calendar": calendar, "prices": prices, "members": members, "events": events,
-            "index": index, "early_end": early_end, "members_until": last_member_day}
+            "index": index, "early_end": early_end, "members_until": last_member_day, "listing": listing}

@@ -37,6 +37,8 @@ class FakeApi:
                 return []
             return [{"BAS_DD": bas_dd, "IDX_NM": "코스닥", "CLSPRC_IDX": "600"},
                     {"BAS_DD": bas_dd, "IDX_NM": "코스닥 150", "CLSPRC_IDX": "1,000.5"}]
+        if endpoint == collect.BASIC_EP:
+            return [{"ISU_SRT_CD": "000001", "LIST_DD": "20100104"}]
         if bas_dd in self.empty_daily:
             return []
         return [{"BAS_DD": bas_dd, "ISU_CD": "000001", "TDD_CLSPRC": "100"}]
@@ -64,6 +66,7 @@ class CollectorTest(unittest.TestCase):
         self.assertNotIn((collect.DAILY_EP, "20150101"), api.log)          # 휴장일 종목 요청 안 함
         self.assertEqual(len(self.store.read("raw/openapi/kosdaq_index/date=20150101.parquet")), 0)
         self.assertTrue(all(d <= "20150109" for _, d in api.log))            # as_of 이후 요청 안 함
+        self.assertEqual(self.files("kosdaq_basic"), ["date=20150109"])        # 달마다 마지막 거래일
 
     def test_rerun_skips(self):
         self.run_c(FakeApi())
@@ -86,13 +89,17 @@ class CollectorTest(unittest.TestCase):
         api = FakeApi()
         self.run_c(api)  # 다음 날 다시 실행 → 남은 날만
         self.assertEqual(api.log, [(collect.DAILY_EP, "20150107"), (collect.DAILY_EP, "20150108"),
-                                   (collect.DAILY_EP, "20150109")])
+                                   (collect.DAILY_EP, "20150109"), (collect.BASIC_EP, "20150109")])
 
     def test_api_error_stops(self):
         api = FakeApi(raise_on=(collect.INDEX_EP, "20150101", ApiError("401")))
         with self.assertRaises(ApiError):
             self.run_c(api)
         self.assertEqual(api.calls, 1)
+
+    def test_month_ends(self):
+        self.assertEqual(collect.month_ends(["20150129", "20150130", "20150202", "20150227", "20150302"]),
+                         ["20150130", "20150227", "20150302"])
 
     def test_limit_and_snapshot(self):
         self.run_c(FakeApi(), limit=3)
@@ -227,6 +234,16 @@ class OpenApiAdapterTest(unittest.TestCase):
         # 000001: 코스닥 데이터는 07-15에 끝, 기존 데이터는 07-16까지 → moved
         self.assertEqual(ee.loc["000001", "kind"], "moved")
         self.assertNotIn("000002", ee.index)
+
+    def test_listing_dates(self):
+        (self.api / "kosdaq_basic").mkdir()
+        pd.DataFrame([{"ISU_SRT_CD": "000001", "LIST_DD": "20100104"},
+                      {"ISU_SRT_CD": "000002", "LIST_DD": "20150715"}]).to_parquet(
+            self.api / "kosdaq_basic/date=20150716.parquet")
+        pd.DataFrame([{"ISU_SRT_CD": "000003", "LIST_DD": "20200101"}]).to_parquet(
+            self.api / "kosdaq_basic/date=20200131.parquet")                          # as_of 이후 파일은 안 읽음
+        lst = self.load()["listing"].set_index("ticker")["list_date"]
+        self.assertEqual(lst.to_dict(), {"000001": pd.Timestamp("2010-01-04"), "000002": pd.Timestamp("2015-07-15")})
 
     def test_missing_daily_file_raises(self):
         (self.api / "kosdaq_daily/date=20150715.parquet").unlink()

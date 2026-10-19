@@ -106,8 +106,9 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
 
 ## 8. KRX Open API 수집·어댑터 (`src/krxapi`, `src/pipeline/openapi.py`)
 
-공식 경로. 승인된 API 두 개만 쓴다: **코스닥 일별매매정보**(`sto/ksq_bydd_trd`, 날짜별 코스닥 전 종목)와
-**KOSDAQ 시리즈 일별시세정보**(`idx/kosdaq_dd_trd`, `IDX_NM == "코스닥 150"` 행). 명세서: `docs/API 명세서/Spec.docx`.
+공식 경로. 승인된 API 세 개를 쓴다: **코스닥 일별매매정보**(`sto/ksq_bydd_trd`, 날짜별 코스닥 전 종목),
+**KOSDAQ 시리즈 일별시세정보**(`idx/kosdaq_dd_trd`, `IDX_NM == "코스닥 150"` 행), **코스닥 종목기본정보**
+(`sto/ksq_isu_base_info`, 상장일). 유가증권 일별매매정보는 신청하지 않았다. 명세서: `docs/API 명세서/Spec.docx`.
 
 ```bash
 # .env: KRX_OPENAPI_KEY(인증키), COLLECTOR_ID
@@ -117,11 +118,13 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
 ```
 
 - 설정 `configs/krxapi.yaml`: `as_of`(2025-12-30, [미확인]), `start`, `sleep_sec`(0.5), `max_calls`(9,500 — 키당 하루 10,000건)
-- 순서: 평일마다 지수 → `코스닥 150` 행이 있는 날(거래일)마다 종목. 휴장일은 0행 지수 파일로 남겨 다시 요청하지 않는다.
+- 순서: 평일마다 지수 → `코스닥 150` 행이 있는 날(거래일)마다 종목 → 달마다 마지막 거래일에 종목기본정보.
+  휴장일은 0행 지수 파일로 남겨 다시 요청하지 않는다. 종목기본정보는 과거 날짜로 조회하면 그날 상장돼 있던 종목 전체
+  (나중에 상장폐지된 종목 포함)가 오고 상장일은 바뀌지 않으므로 월 1회면 충분하다 (한 달 안에 상장·폐지된 종목만 빠질 수 있음).
   거래일인데 종목 응답이 비면 실패로 기록하고 다시 실행할 때 그날만 받는다. 끝나면 연도별 평일 휴장 수를 출력한다(KRX 휴장일과 대조).
-- 저장: `data/raw/openapi/{kosdaq_index|kosdaq_daily}/date=YYYYMMDD.parquet` (원본 문자열), `progress.jsonl`, `MANIFEST.csv`, `snapshot.json`
+- 저장: `data/raw/openapi/{kosdaq_index|kosdaq_daily|kosdaq_basic}/date=YYYYMMDD.parquet` (원본 문자열), `progress.jsonl`, `MANIFEST.csv`, `snapshot.json`
 - 401 `Unauthorized Key` = 키 문제, `Unauthorized API Call` = 그 API 이용신청이 승인되지 않음 → 재시도하지 않고 멈춘다.
-- 요청 수: 2015-01 ~ 2025-12 평일 약 2,870 + 거래일 약 2,710 ≈ 5,600건 (하루 안에 가능)
+- 요청 수: 2015-01 ~ 2025-12 평일 약 2,870 + 거래일 약 2,710 + 월말 132 ≈ 5,700건 (하루 안에 가능)
 
 **어댑터에서 처리하는 것**
 
@@ -135,4 +138,4 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
 - **이전 상장 종목**: 승인된 API는 코스닥뿐이라, 유가증권시장으로 옮긴 종목은 이전 이후 데이터가 없다. 그 구간은
   `event_phases`에서 "종목 데이터 기간 밖"으로 자동 제외되고, `prepare`가 이전 상장 추정 종목 수와 제외된 구간 수를 출력한다.
   판정(`early_end`): universe 종목 중 코스닥 데이터가 as_of 전에 끝나는데 기존 데이터는 7일 넘게 이어지면 `moved`, 같이 끝나면 `ended`(상장폐지 추정).
-- 상장일: 종목기본정보 API는 신청하지 않았다. 필요하면 일별매매정보의 첫 등장일로 대신한다(2010-01-04 이후 상장 종목만 정확).
+- 상장일(`listing`): 월말 종목기본정보의 `LIST_DD`를 종목별로 모은다.

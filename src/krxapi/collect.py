@@ -5,8 +5,10 @@
      → 휴장일은 빈 응답(0행 파일로 저장해 다시 요청하지 않음)
   2. 지수 응답에 "코스닥 150" 행이 있는 날(= 거래일)마다 코스닥 일별매매정보(sto/ksq_bydd_trd)
      → 거래일인데 빈 응답이면 실패로 기록하고 파일을 만들지 않는다 (다시 실행하면 그날만 받음)
+  3. 매달 마지막 거래일마다 코스닥 종목기본정보(sto/ksq_isu_base_info) — 상장일(LIST_DD)용.
+     과거 날짜로 조회하면 그날 상장돼 있던 종목 전체(나중에 상장폐지된 종목 포함)가 온다
 
-저장: data/raw/openapi/{kosdaq_index|kosdaq_daily}/date=YYYYMMDD.parquet — 응답 원본 문자열 그대로.
+저장: data/raw/openapi/{kosdaq_index|kosdaq_daily|kosdaq_basic}/date=YYYYMMDD.parquet — 응답 원본 문자열 그대로.
 Open API 가격은 수정주가가 아니라 그날 실제 가격이므로 받은 날짜에 따라 과거 값이 바뀌지 않는다.
 """
 import pandas as pd
@@ -18,8 +20,17 @@ ROOT = "raw/openapi"
 SNAPSHOT = f"{ROOT}/snapshot.json"
 INDEX_EP = "idx/kosdaq_dd_trd"
 DAILY_EP = "sto/ksq_bydd_trd"
+BASIC_EP = "sto/ksq_isu_base_info"
 INDEX_NAME = "코스닥 150"
 MAX_CONSECUTIVE_FAILURES = 10
+
+
+def month_ends(trading):
+    """거래일 목록(YYYYMMDD)에서 달마다 마지막 거래일."""
+    last = {}
+    for d in trading:
+        last[d[:6]] = max(last.get(d[:6], d), d)
+    return sorted(last.values())
 
 
 class Collector:
@@ -77,6 +88,8 @@ class Collector:
             trading = self.trading_days(days)
             for d in tqdm(trading, desc="kosdaq_daily"):
                 self.unit(f"kosdaq_daily/date={d}.parquet", DAILY_EP, d, require_rows=True)
+            for d in tqdm(month_ends(trading), desc="kosdaq_basic"):
+                self.unit(f"kosdaq_basic/date={d}.parquet", BASIC_EP, d, require_rows=True)
         finally:
             n = self.store.write_manifest(self.cfg["as_of"])
             self.log(f"새로 받음 {self.fetched}, 건너뜀 {self.skipped}, 실패 {len(self.failed)}, "
