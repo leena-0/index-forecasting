@@ -2,6 +2,7 @@
 requests
 pandas
 pyarrow
+openpyxl
 python-dotenv
 pyyaml
 tqdm
