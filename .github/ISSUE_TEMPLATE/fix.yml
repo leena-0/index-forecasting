@@ -1,0 +1,42 @@
+name: "버그 (fix)"
+description: 재현 가능한 오류나 잘못된 동작을 보고합니다.
+title: "[fix] "
+labels: ["fix"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 문제 설명
+      description: 무엇이 잘못되었는지 명확하게 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 방법
+      placeholder: |
+        1. ... 명령을 실행한다.
+        2. ... 입력을 사용한다.
+        3. 오류를 확인한다.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 동작
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 로그 및 추가 정보
+      description: 민감 정보(API 키, 개인정보)는 제거해 주세요.
+      render: shell
+  - type: input
+    id: environment
+    attributes:
+      label: 실행 환경
+      description: OS와 Python 버전을 적어 주세요.
+      placeholder: macOS 15 / Python 3.11
+    validations:
+      required: true
