@@ -1,0 +1,40 @@
+name: "기능 (feat)"
+description: 새로운 기능이나 개선 사항을 제안합니다.
+title: "[feat] "
+labels: ["feat"]
+body:
+  - type: markdown
+    attributes:
+      value: 제안 배경과 완료 조건을 구체적으로 작성해 주세요.
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경 및 목적
+      description: 이 기능이 필요한 이유와 해결하려는 문제를 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 구현 내용
+      description: 원하는 동작, 입력과 출력, 관련 모듈을 적어 주세요.
+      placeholder: |
+        - 변경할 내용:
+        - 예상 결과:
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건
+      description: 이 이슈가 완료됐다고 판단할 수 있는 조건을 체크리스트로 작성해 주세요.
+      placeholder: |
+        - [ ] 기능이 예상대로 동작한다.
+        - [ ] 테스트와 문서가 갱신된다.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 참고 자료
+      description: 관련 문서, 이슈, 이미지 또는 추가 맥락이 있다면 적어 주세요.
