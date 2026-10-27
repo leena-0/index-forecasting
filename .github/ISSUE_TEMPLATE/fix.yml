@@ -24,8 +24,7 @@ body:
     id: expected
     attributes:
       label: 기대한 동작
-    validations:
-      required: true
+      description: 원래 어떻게 동작해야 하는지 알고 있다면 작성해 주세요. (선택)
   - type: textarea
     id: logs
     attributes:
@@ -36,7 +35,5 @@ body:
     id: environment
     attributes:
       label: 실행 환경
-      description: OS와 Python 버전을 적어 주세요.
+      description: 환경에 따라 발생하는 문제라면 OS와 Python 버전을 적어 주세요. (선택)
       placeholder: macOS 15 / Python 3.11
-    validations:
-      required: true
