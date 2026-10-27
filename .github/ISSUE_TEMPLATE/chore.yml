@@ -14,19 +14,17 @@ body:
     id: checklist
     attributes:
       label: 세부 작업
+      description: 필요한 경우 체크리스트를 작성해 주세요. (선택)
       placeholder: |
         - [ ] 작업 1
         - [ ] 작업 2
-    validations:
-      required: true
   - type: textarea
     id: done
     attributes:
       label: 완료 조건
-      description: 검증 방법이나 산출물을 적어 주세요.
-    validations:
-      required: true
+      description: 검증 방법이나 산출물이 있다면 적어 주세요. (선택)
   - type: textarea
     id: context
     attributes:
       label: 참고 자료
+      description: 관련 문서나 링크가 있다면 적어 주세요. (선택)
