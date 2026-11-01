@@ -23,6 +23,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 |---|---|
 | `targets_h{h}.parquet` | `ticker, origin_date, horizon, yz_var, split, embargo` — 종목·거래일마다 다음 h일의 Yang–Zhang 분산 |
 | `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev` |
+| `members.parquet` | `date, ticker` — 그날의 구성종목. 공통 평가의 대조군에 쓴다 (`docs/EVALUATION.md`) |
 | `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약, **`reportable: false`와 `hold_reasons`** (구성종목·이벤트가 legacy이고 공지일이 임시값이라 최종 결과에 반영하지 않음) |
 
 모델이 쓸 수 있는 예측 행 = `yz_var`가 결측이 아니고 `embargo == False`.

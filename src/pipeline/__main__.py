@@ -5,6 +5,7 @@
 결과(out_dir, git 제외):
   targets_h{h}.parquet   ticker, origin_date, horizon, yz_var, split, embargo
   event_phases.parquet   이벤트 × 구간 (complete, reason, split, crosses_split, baseline_overlaps_prev)
+  members.parquet        date, ticker — 그날의 구성종목 (평가의 대조군, src.evaluate)
   meta.json              data_source, as_of, config, git commit, 패키지 버전, 건수 요약
 """
 import argparse
@@ -81,6 +82,7 @@ def prepare(cfg):
 
     ph = event_phases(events, cal, prices, cfg["event_phases"], cfg["split"])
     ph.to_parquet(out_dir / "event_phases.parquet", index=False)
+    data["members"].to_parquet(out_dir / "members.parquet", index=False)
     s = summarize(ph)
     print("\n이벤트 구간 (split, phase, 제외 이유, 건수; 이유가 빈칸이면 사용 가능):")
     print(s.to_string(index=False))
