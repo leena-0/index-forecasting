@@ -4,6 +4,7 @@
 
 결과(out_dir, git 제외):
   targets_h{h}.parquet   ticker, origin_date, horizon, yz_var, split, embargo
+  features.parquet       ticker, date, 모델 입력 특성 (features.py, 불러오기는 features.load_panel)
   event_phases.parquet   이벤트 × 구간 (complete, reason, split, crosses_split, baseline_overlaps_prev)
   meta.json              data_source, as_of, config, git commit, 패키지 버전, 건수 요약
 """
@@ -21,6 +22,7 @@ import yaml
 from dotenv import load_dotenv
 
 from . import legacy, openapi
+from .features import build_features
 from .target import forward_yz
 from .windows import assign_splits, event_phases, summarize
 
@@ -78,6 +80,11 @@ def prepare(cfg):
         print(f"h={h}: 행 {c['rows']}, 타깃 결측 {c['yz_nan']}, 경계 공백 {c['embargo']}, "
               f"0 이하 {c['nonpositive']}, 사용 가능 {c['usable_by_split']}")
         t.to_parquet(out_dir / f"targets_h{h}.parquet", index=False)
+
+    feats = build_features(prices, cal, data["members"], cfg["yang_zhang"]["demean"])
+    feats.to_parquet(out_dir / "features.parquet", index=False)
+    counts["features_nan"] = feats.drop(columns=["ticker", "date"]).isna().sum().to_dict()
+    print(f"특성 {len(feats)}행, 결측 {counts['features_nan']}")
 
     ph = event_phases(events, cal, prices, cfg["event_phases"], cfg["split"])
     ph.to_parquet(out_dir / "event_phases.parquet", index=False)

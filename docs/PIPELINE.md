@@ -22,11 +22,37 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 | 파일 | 내용 |
 |---|---|
 | `targets_h{h}.parquet` | `ticker, origin_date, horizon, yz_var, split, embargo` — 종목·거래일마다 다음 h일의 Yang–Zhang 분산 |
+| `features.parquet` | `ticker, date` + 모델 입력 특성 (아래 표). 모델은 `load_panel`로 읽는다 |
 | `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev` |
 | `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약, **`reportable: false`와 `hold_reasons`** (구성종목·이벤트가 legacy이고 공지일이 임시값이라 최종 결과에 반영하지 않음) |
 
 모델이 쓸 수 있는 예측 행 = `yz_var`가 결측이 아니고 `embargo == False`.
 이벤트 구간 분석에 쓸 수 있는 행 = `complete == True` 이고 `crosses_split == False`.
+
+### 모델 입력 패널 (`src/pipeline/features.py`, CLAUDE.md 6.2) [제안]
+
+```python
+from src.pipeline.features import load_panel
+panel = load_panel("data/dev_openapi", h=5)   # 특성 + yz_var + log_var + split + embargo
+usable = panel[panel["log_var"].notna() & ~panel["embargo"]]
+```
+
+t일 특성은 t일 장 마감까지 알 수 있는 값만 쓴다 (3장). 창 안에 결측이 있으면 NaN (보간 없음).
+기업행사일(`corp_action`)의 야간 수익률·종가 수익률은 NaN.
+
+| 특성 | 정의 |
+|---|---|
+| `rv_d` | o_t² + u_t(u_t − c_t) + d_t(d_t − c_t) — 일별 분산 대용치 (야간 수익률 제곱 + Rogers–Satchell) |
+| `rv_w`, `rv_m` | `rv_d`의 최근 5일·22일 평균 — HAR 구성요소 (Corsi, 2009) |
+| `yz_5`, `yz_22` | 구간 t−h+1 ~ t의 Yang–Zhang 분산 (타깃과 같은 정의, origin t−h의 타깃) |
+| `ret` | ln(C_t / C_{t−1}) |
+| `log_turnover` | ln(거래량 / 상장주식수) |
+| `log_mcap` | ln(시가총액) |
+| `is_member` | t일 구성종목 여부 |
+| `n_obs` | 종목 첫 행부터 t까지 거래일 수 (이력 길이, 6.3) |
+| `log_var` | ln(yz_var) — 학습 타깃(5.2). `yz_var ≤ 0`이면 NaN |
+
+모델별 입력 길이(lookback)와 이력이 짧은 종목 처리(6.3)는 아직 정하지 않았다.
 
 테스트: `.venv/Scripts/python -m unittest` (합성 데이터, 네트워크 없음)
 
@@ -102,6 +128,7 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
    쓸 수 없다. 규칙은 [확정]이라 코드는 그대로 두었고, 대안(구간별로 경계 판정, 검증 구간 연장 등)은 팀 논의가 필요하다.
 2. **as_of와 테스트 구간**: 기존 데이터에 2025년이 없어 테스트 구간이 2024년뿐이다. 테스트 구간은 개발 중에 보지 않는다(4.1).
 3. **yz_var ≤ 0**: 모델은 로그 분산으로 학습하므로(5.2) 0 이하 값의 처리(제외 등)를 모델 단계에서 정해야 한다. 건수는 `meta.json`에 있다.
+   `load_panel`은 이 행의 `log_var`를 NaN으로 두어 학습·평가에서 빠지게 한다.
 4. 견고성 확인용 편입일 ±250영업일 윈도우(4.3)와 종가-종가 실현변동성 타깃(5.2)은 아직 없다.
 5. 구성종목 이력·이벤트는 `openapi`에서도 기존 데이터(2024-12-30까지)를 쓴다. 공식 출처(DECISIONS.md 3.3)가 정해지면 교체한다.
 
