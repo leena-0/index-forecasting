@@ -20,6 +20,8 @@ import pandas as pd
 import yaml
 from dotenv import load_dotenv
 
+from src.events import load_announcements, reconcile_events
+
 from . import legacy, openapi
 from .target import forward_yz
 from .windows import assign_splits, event_phases, summarize
@@ -60,6 +62,18 @@ def prepare(cfg):
     else:
         raise ValueError(f"지원하지 않는 data_source: {cfg['data_source']}")
     cal, prices, events = data["calendar"], data["prices"], data["events"]
+    events_path = cfg.get("events_path")
+    if events_path:
+        path = Path(events_path)
+        if not path.is_absolute():
+            path = REPO / path
+        announcements = load_announcements(path, cfg["as_of"])
+        reconciled = reconcile_events(events, announcements)
+        reconciled.require_complete()
+        events = reconciled.events
+        data["events"] = events
+        counts["announcements"] = len(announcements)
+        print(f"[events] 실제 공지일 {len(events)}건 결합: {path}")
 
     bad = legacy.check_events(events, data["members"], cal)
     print(f"거래일 {len(cal)} ({cal[0].date()} ~ {cal[-1].date()}), 종목 {prices['ticker'].nunique()}, "
@@ -97,15 +111,18 @@ def prepare(cfg):
     print(f"\n분할별 이벤트 {counts['events_by_split']}, 그중 윈도우가 경계를 넘어 제외 "
           f"{counts['events_crossing_split']}, 기준 구간이 직전 사후 구간과 겹침 {counts['baseline_overlaps_prev']}")
 
-    # 구성종목·이벤트가 아직 legacy(pykrx 자동 수집, 임시 공지일)이므로 어떤 data_source든 최종 결과에 반영하지 않는다
-    hold = ["구성종목·이벤트가 legacy(개발용) 데이터", "공지일이 임시값(편입일)"]
+    # 구성종목·이벤트가 아직 legacy(pykrx 자동 수집)이므로 어떤 data_source든 최종 결과에 반영하지 않는다
+    hold = ["구성종목·이벤트가 legacy(개발용) 데이터"]
+    if not events_path:
+        hold.append("공지일이 임시값(편입일)")
     if cfg["data_source"] == "dev_legacy":
         hold.append("가격도 legacy(네이버 수정주가)")
     print(f"\n[보류] 최종 결과에 반영하지 않음: {', '.join(hold)}")
     meta = {"data_source": cfg["data_source"], "as_of": cfg["as_of"], "created_at": dt.datetime.now()
             .astimezone().isoformat(timespec="seconds"), "git_commit": git_commit(), "config": cfg,
             "versions": {"python": sys.version.split()[0], "pandas": pd.__version__, "numpy": np.__version__},
-            "counts": counts, "members_source": "legacy", "announce_source": "placeholder",
+            "counts": counts, "members_source": "legacy",
+            "announce_source": "events_file" if events_path else "placeholder",
             "reportable": False, "hold_reasons": hold, "note": "개발용 — 결과 수치로 보고하지 않는다"}
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2, default=str),
                                        encoding="utf-8")
