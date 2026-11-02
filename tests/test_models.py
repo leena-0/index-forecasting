@@ -2,6 +2,7 @@
 
     .venv/Scripts/python -m unittest
 """
+import importlib.util
 import json
 import math
 import shutil
@@ -12,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.models import ewma, har
+from src.models import ewma, har, lgbm, lstm
 from src.models.__main__ import run
 from src.pipeline.features import build_features
 from src.pipeline.target import forward_yz
@@ -106,6 +107,73 @@ class RunTest(unittest.TestCase):
         self.assertFalse(meta["reportable"])
         self.assertEqual(set(meta["params"]["beta"]), {"const", "rv_d", "rv_w", "rv_m"})
 
+
+
+HAS_LGBM = importlib.util.find_spec("lightgbm") is not None
+HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+
+def ml_panel(n_days=80, tickers=("A", "B")):
+    cal, prices = make_prices(n_days=n_days, tickers=tickers)
+    f = build_features(prices, cal, pd.DataFrame(columns=["date", "ticker"])).rename(columns={"date": "origin_date"})
+    t = forward_yz(prices, cal, 5)
+    p = f.merge(t, on=["ticker", "origin_date"])
+    p["log_var"] = np.log(p["yz_var"].where(p["yz_var"] > 0))
+    p["split"] = np.where(p["origin_date"] < cal[50], "train", "val")
+    p["embargo"] = False
+    return p.sort_values(["ticker", "origin_date"], ignore_index=True)
+
+
+class SequenceTest(unittest.TestCase):
+    def test_windows_per_ticker_without_missing(self):
+        p = ml_panel()
+        X, rows = lstm.sequences(p, 5)
+        self.assertEqual(X.shape[1:], (5, 3))
+        self.assertTrue(np.isfinite(X).all())
+        z = lstm.daily_features(p)
+        r = rows[10]
+        np.testing.assert_array_equal(X[10], z[r - 4:r + 1])  # 창 끝 = 예측 시점 t
+        self.assertTrue((p["ticker"].to_numpy()[rows - 4] == p["ticker"].to_numpy()[rows]).all())  # 종목 경계를 넘지 않음
+        first_b = p.index[p["ticker"] == "B"][0]
+        self.assertNotIn(first_b + 3, set(rows))  # B의 첫 5일 전에는 창이 없음
+
+    def test_no_future_leak(self):
+        p = ml_panel()
+        X1, r1 = lstm.sequences(p, 5)
+        p2 = p.copy()
+        cut = p2["origin_date"].sort_values().unique()[40]
+        p2.loc[p2["origin_date"] > cut, ["rv_d", "ret", "log_turnover"]] = 9.0
+        X2, r2 = lstm.sequences(p2, 5)
+        w1, w2 = dict(zip(r1, X1)), dict(zip(r2, X2))
+        early = [r for r in r1 if p.loc[r, "origin_date"] <= cut]
+        self.assertGreater(len(early), 0)
+        for r in early:  # 컷오프까지의 창은 컷오프 이후 값을 바꿔도 같다
+            np.testing.assert_array_equal(w1[r], w2[r])
+
+
+@unittest.skipUnless(HAS_LGBM, "lightgbm 없음 (requirements-models.txt)")
+class LgbmTest(unittest.TestCase):
+    def test_trains_on_train_only(self):
+        p = ml_panel()
+        m1, n = lgbm.fit(p, params={"num_boost_round": 20})
+        p2 = p.copy()
+        p2.loc[p2["split"] == "val", "log_var"] = 100.0  # 검증 구간 값은 학습에 영향 없음
+        m2, _ = lgbm.fit(p2, params={"num_boost_round": 20})
+        np.testing.assert_allclose(lgbm.predict(p, m1), lgbm.predict(p, m2))
+        self.assertEqual(n, int(((p["split"] == "train") & p["log_var"].notna()).sum()))
+
+
+@unittest.skipUnless(HAS_TORCH, "torch 없음 (requirements-models.txt)")
+class LstmTest(unittest.TestCase):
+    def test_fit_predict(self):
+        p = ml_panel()
+        params = {"lookback": 5, "hidden": 4, "epochs": 2, "batch_size": 16}
+        pred, info = lstm.fit_predict(p, seed=0, params=params)
+        pred2, _ = lstm.fit_predict(p, seed=0, params=params)
+        np.testing.assert_allclose(pred.dropna(), pred2.dropna())  # 같은 seed → 같은 결과
+        _, rows = lstm.sequences(p, 5)
+        self.assertEqual(pred.notna().sum(), len(rows))
+        self.assertEqual(len(info["train_loss_by_epoch"]), 2)
 
 if __name__ == "__main__":
     unittest.main()

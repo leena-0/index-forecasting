@@ -1,0 +1,4 @@
+# 모델 단계 추가 의존성 (LightGBM·LSTM) — 수집·파이프라인·CI에는 필요 없음
+# 설치: pip install -r requirements-models.txt --extra-index-url https://download.pytorch.org/whl/cpu (torch CPU 빌드)
+lightgbm
+torch
