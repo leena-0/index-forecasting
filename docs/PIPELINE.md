@@ -46,6 +46,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 | `yang_zhang.demean` | `true` | Yang–Zhang 분산의 평균 처리 — 아래 3절 |
 | `event_phases` | CLAUDE.md 4.3 | 구간별 기준점(`anchor`: `announce` 공지일 / `effective` 편입일)과 영업일 오프셋 `range: [시작, 끝]`(양 끝 포함). `announce_to_effective`(공지일 ~ 편입일 직전)는 고정 |
 | `placeholder_announce` | `effective` | 공지일이 없을 때 쓰는 임시 공지일. 지금은 편입일만 지원 — 아래 4절 |
+| `events_path` | `null` | 실제 공지일 CSV. 설정하면 기존 구성종목 변화와 일대일 대조한 뒤 실제 공지일을 사용한다. 형식은 `docs/EVENTS.md` |
 | `out_dir` | `data/dev` | 결과 저장 폴더 (레포 루트 기준) |
 
 ### 3. `yang_zhang.demean` — n = 5에서의 평균 처리 (CLAUDE.md 5.3)
@@ -70,8 +71,9 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
 - `baseline`·`anticipation`은 실제보다 공지~편입 기간만큼 뒤로 밀린다
 - 이벤트의 분할 배정도 실제 공지일과 다를 수 있다
 
-→ 이 상태의 구간별 결과는 해석하지 않는다. 공지일 모듈(`src/events/`, CLAUDE.md 2.4)이 생기면
-`announcements.csv`를 읽어 실제 공지일을 넣고 `announce_source`를 `crawled`/`manual`로 바꾼다.
+→ 이 상태의 구간별 결과는 해석하지 않는다. 실제 공지일을 구축한 뒤 `events_path`에
+`data/raw/events/announcements.csv`를 설정하면 `src/events`가 기존 구성종목 변화와 일대일 대조하고,
+실제 공지일과 `announce_source`의 `crawled`/`manual` 값을 사용한다.
 
 ## 5. 처리 규칙 요약
 
