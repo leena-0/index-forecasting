@@ -1,7 +1,7 @@
-"""LSTM — 최근 L거래일의 일별 특성 시퀀스 → 다음 h일 로그 분산 (CLAUDE.md 6.1).
+"""시퀀스 모델 (LSTM, GRU) — 최근 L거래일의 일별 특성 시퀀스 → 다음 h일 로그 분산 (CLAUDE.md 6.1).
 
     입력 X_t = [z_{t−L+1}, …, z_t],  z_s = [ln rv_d, ret, log_turnover]_s  (학습 구간 평균·표준편차로 표준화)
-    출력     = Linear(LSTM 마지막 은닉 상태) = 예측 log_var_t
+    출력     = Linear(순환 셀의 마지막 은닉 상태) = 예측 log_var_t,  셀 = arch (lstm: 1단계, gru: 2단계)
     손실     = MSE (로그 분산, CLAUDE.md 5.2)
 
 - 시퀀스는 종목별로 달력상 연속한 L일이다 (특성 패널은 종목마다 첫 행 ~ 마지막 행을 달력에 맞춰 펼친 표).
@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 SEQ_FEATURES = ["rv_d", "ret", "log_turnover"]
-PARAMS = {"lookback": 22, "hidden": 32, "layers": 1, "epochs": 5, "batch_size": 1024, "lr": 1e-3}
+PARAMS = {"arch": "lstm", "lookback": 22, "hidden": 32, "layers": 1, "epochs": 5, "batch_size": 1024, "lr": 1e-3}
 
 
 def daily_features(panel):
@@ -45,17 +45,22 @@ def sequences(panel, lookback):
     return np.concatenate(xs), np.concatenate(rows)
 
 
-def _net(n_in, hidden, layers):
+def _net(n_in, p):
+    """arch에 맞는 신경망. 입력 (배치 × L × 특성) → (배치,) 예측 log_var (표준화된 값)."""
     import torch
+
+    rnn = {"lstm": torch.nn.LSTM, "gru": torch.nn.GRU}
+    if p["arch"] not in rnn:
+        raise ValueError(f"지원하지 않는 arch: {p['arch']}")
 
     class Net(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.lstm = torch.nn.LSTM(n_in, hidden, num_layers=layers, batch_first=True)
-            self.head = torch.nn.Linear(hidden, 1)
+            self.rnn = rnn[p["arch"]](n_in, p["hidden"], num_layers=p["layers"], batch_first=True)
+            self.head = torch.nn.Linear(p["hidden"], 1)
 
         def forward(self, x):
-            out, _ = self.lstm(x)
+            out, _ = self.rnn(x)
             return self.head(out[:, -1]).squeeze(-1)
 
     return Net()
@@ -80,7 +85,7 @@ def fit_predict(panel, seed=0, params=None):
     X = (X - mu) / sd
     y_mu, y_sd = y[is_tr].mean(), y[is_tr].std()
 
-    net = _net(X.shape[2], p["hidden"], p["layers"])
+    net = _net(X.shape[2], p)
     opt = torch.optim.Adam(net.parameters(), lr=p["lr"])
     Xt, yt = torch.from_numpy(X[is_tr]), torch.from_numpy((y[is_tr] - y_mu) / y_sd)
     gen = torch.Generator().manual_seed(seed)

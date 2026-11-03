@@ -5,6 +5,7 @@
     python -m src.models --model har  --h 22
     python -m src.models --model lgbm --h 5 [--seed 0]    # lightgbm 필요 (requirements-models.txt)
     python -m src.models --model lstm --h 5 [--seed 0]    # torch 필요
+    python -m src.models --model gru|gnn --h 5            # 2단계 (torch), garch (scipy)
 
 결과(out, git 제외):
   {model}_h{h}.parquet     ticker, origin_date, horizon, pred_log_var, model, seed, version
@@ -47,8 +48,8 @@ def run(model, h, data_dir, out_dir, params=None, seed=0, name=None):
             info[pkg] = sys.modules[pkg].__version__
     if model == "har":
         print(f"HAR 계수 (학습 {info['n_fit']}행): {info['beta']}")
-    elif model == "lstm":
-        print(f"LSTM 학습 {info['n_train']}행, 에포크별 학습 손실 {info['train_loss_by_epoch']}")
+    elif "train_loss_by_epoch" in info:
+        print(f"{name} 에포크별 학습 손실 {info['train_loss_by_epoch']}")
     table = prediction_table(panel, pred, name, seed=seed, version=git_commit())
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{name}_h{h}"

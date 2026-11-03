@@ -15,7 +15,7 @@
 모든 분할(train·val·test)의 예측을 만든다. 테스트 구간 평가는 `src.evaluate --split test --final`로 한 번만 한다.
 `{model}_h{h}.meta.json`에 설정·계수·git commit과 prepare의 `reportable`이 남는다.
 
-## 2. 모델 (1단계, CLAUDE.md 6.1) [제안]
+## 2. 모델 (1·2단계, CLAUDE.md 6.1) [제안]
 
 | 모델 | 정의 | 설정 |
 |---|---|---|
@@ -23,6 +23,9 @@
 | HAR (Corsi, 2009) | log_var = β0 + β1·ln rv_d + β2·ln rv_w + β3·ln rv_m | 전 종목 통합 OLS, 학습 구간(`train`, `embargo == False`)에서 한 번 추정 |
 | LightGBM | t일 특성(분산 특성은 로그) → log_var, L2 손실 | 하이퍼파라미터 고정(`lgbm.PARAMS`: 학습률 0.05, 트리 500개, 잎 31, 잎 최소 100행, 행·특성 표본 80%), 튜닝 없음. 결측은 LightGBM이 따로 분기 |
 | LSTM | 최근 22거래일 `[ln rv_d, ret, log_turnover]` 시퀀스 → log_var, MSE | 은닉 32, 1층, 에포크 5(고정, 조기 종료 없음), 배치 1024, Adam 1e-3. 학습 구간 통계로 표준화. 창 안에 결측이 있으면 예측 없음 |
+| GRU (2단계) | LSTM과 같은 시퀀스 입력, 순환 셀만 GRU (`lstm.py`의 `arch: gru`) | LSTM과 같은 기본값 |
+| GARCH(1,1) (2단계) | 종목별 종가 수익률, 분산 목표화 QMLE(학습 구간) → 다음 h일 평균 조건부 분산 | `mean: zero`, `min_obs: 250`(미만이면 다른 종목 추정치 중앙값, 처음 `warmup: 60`개 관측으로 분산), 결측일은 σ²로 갱신 |
+| GNN (2단계) | 날짜별 그래프: 노드 = 그날 특성이 있는 universe 종목(구성종목 + 이벤트 종목), 엣지 = 최근 60일 수익률 상관 상위 k개. GraphSAGE 평균 집계 2층 | `k: 5`, `refresh: 5`일마다 상관 갱신, 은닉 32, 에포크 5 |
 
 - `rv ≤ 0`(가격이 하루 종일 같은 날 등) 행은 HAR에서 로그를 쓸 수 없어 예측하지 않는다. 공통 평가는 모든 모델이 예측한 행만
   쓰므로 이 행은 EWMA 평가에서도 빠진다.
@@ -34,3 +37,5 @@
 ```bash
 .venv/Scripts/python -m pip install -r requirements-models.txt --extra-index-url https://download.pytorch.org/whl/cpu
 ```
+
+하이퍼파라미터는 검증 구간에서 튜닝한다 (`docs/TUNING.md`, 그리드 `configs/tuning.yaml`).
