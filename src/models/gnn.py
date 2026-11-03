@@ -128,7 +128,7 @@ def fit_predict(panel, seed=0, params=None):
             opt.step()
             total += loss.item() * ok.sum()
             n += ok.sum()
-        losses.append(round(total / max(n, 1), 5))
+        losses.append(round(float(total / max(n, 1)), 5))
 
     net.eval()
     out = np.full(len(panel), np.nan)
