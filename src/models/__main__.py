@@ -6,6 +6,7 @@
     python -m src.models --model lgbm --h 5 [--seed 0]    # lightgbm 필요 (requirements-models.txt)
     python -m src.models --model lstm --h 5 [--seed 0]    # torch 필요
     python -m src.models --model gru|gnn --h 5            # 2단계 (torch), garch (scipy)
+    python -m src.models --model tcn|transformer --h 5    # 3단계 (torch)
 
 결과(out, git 제외):
   {model}_h{h}.parquet     ticker, origin_date, horizon, pred_log_var, model, seed, version
