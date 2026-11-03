@@ -33,7 +33,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 
 ```python
 from src.pipeline.features import load_panel
-panel = load_panel("data/dev_openapi", h=5)   # 특성 + yz_var + log_var + split + embargo
+panel = load_panel("data/dev", h=5)   # 특성 + yz_var + log_var + split + embargo
 usable = panel[panel["log_var"].notna() & ~panel["embargo"]]
 ```
 
