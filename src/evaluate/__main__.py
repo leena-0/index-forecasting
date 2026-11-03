@@ -1,6 +1,6 @@
 """공통 평가: 예측 테이블(CLAUDE.md 6.2)만 읽어 지표를 계산한다 (7장).
 
-    python -m src.evaluate --pred 예측1.parquet [예측2.parquet ...] --data-dir data/dev_openapi --split val
+    python -m src.evaluate --pred 예측1.parquet [예측2.parquet ...] --data-dir data/dev --split val
 
 data-dir는 src.pipeline prepare의 결과 폴더 (targets_h{h}.parquet, event_phases.parquet, members.parquet, meta.json).
 테스트 구간은 한 번만 본다 (CLAUDE.md 4.1): --split test는 --final을 함께 줘야 실행된다.
@@ -87,7 +87,7 @@ def evaluate(pred, data_dir, split, out_dir, alpha=0.10, B=1000, seed=0):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m src.evaluate")
     ap.add_argument("--pred", nargs="+", required=True, help="예측 테이블 parquet (CLAUDE.md 6.2)")
-    ap.add_argument("--data-dir", default="data/dev_openapi", help="src.pipeline prepare 결과 폴더")
+    ap.add_argument("--data-dir", default="data/dev", help="src.pipeline prepare 결과 폴더")
     ap.add_argument("--split", choices=["train", "val", "test"], default="val")
     ap.add_argument("--final", action="store_true", help="테스트 구간 평가를 허용 (한 번만)")
     ap.add_argument("--out", default=None, help="결과 폴더 (기본 data/eval/<split>)")

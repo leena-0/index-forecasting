@@ -8,7 +8,7 @@
 
 ```bash
 # 먼저 prepare 결과 폴더가 있어야 한다 (members.parquet 포함 — 예전 결과 폴더는 prepare를 다시 실행)
-.venv/Scripts/python -m src.evaluate --pred 예측1.parquet 예측2.parquet --data-dir data/dev_openapi --split val
+.venv/Scripts/python -m src.evaluate --pred 예측1.parquet 예측2.parquet --data-dir data/dev --split val
 ```
 
 - `--split test`는 `--final`을 함께 줘야 실행된다. 테스트 구간은 한 번만 본다 (CLAUDE.md 4.1).
