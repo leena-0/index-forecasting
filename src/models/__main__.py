@@ -1,6 +1,6 @@
 """모델 실행: 공통 특성 패널 → 예측 테이블 (CLAUDE.md 6.2).
 
-    python -m src.models --model ewma --h 5 [--lam 0.94] [--data-dir data/dev_openapi] [--out data/preds]
+    python -m src.models --model ewma --h 5 [--lam 0.94] [--data-dir data/dev] [--out data/preds]
     python -m src.models --model har  --h 22
     python -m src.models --model lgbm --h 5 [--seed 0]    # lightgbm 필요 (requirements-models.txt)
     python -m src.models --model lstm --h 5 [--seed 0]    # torch 필요
