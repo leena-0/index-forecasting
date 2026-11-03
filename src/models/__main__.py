@@ -1,6 +1,6 @@
 """모델 실행: 공통 특성 패널 → 예측 테이블 (CLAUDE.md 6.2).
 
-    python -m src.models --model ewma --h 5 [--lam 0.94] [--data-dir data/dev_openapi] [--out data/preds]
+    python -m src.models --model ewma --h 5 [--lam 0.94] [--data-dir data/dev] [--out data/preds]
     python -m src.models --model har  --h 22
 
 결과(out, git 제외):
@@ -66,7 +66,7 @@ def main(argv=None):
     ap.add_argument("--model", choices=["ewma", "har"], required=True)
     ap.add_argument("--h", type=int, choices=[5, 22], required=True)
     ap.add_argument("--lam", type=float, default=0.94, help="EWMA 감쇠 계수 λ")
-    ap.add_argument("--data-dir", default="data/dev_openapi", help="src.pipeline prepare 결과 폴더")
+    ap.add_argument("--data-dir", default="data/dev", help="src.pipeline prepare 결과 폴더")
     ap.add_argument("--out", default="data/preds")
     args = ap.parse_args(argv)
     run(args.model, args.h, REPO / args.data_dir, REPO / args.out, args.lam)

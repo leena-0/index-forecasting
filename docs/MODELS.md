@@ -7,8 +7,8 @@
 
 ```bash
 # prepare 결과 폴더(features.parquet 포함)가 있어야 한다
-.venv/Scripts/python -m src.models --model ewma --h 5 --data-dir data/dev_openapi    # → data/preds/EWMA_h5.parquet
-.venv/Scripts/python -m src.models --model har  --h 22 --data-dir data/dev_openapi   # → data/preds/HAR_h22.parquet
+.venv/Scripts/python -m src.models --model ewma --h 5 --data-dir data/dev    # → data/preds/EWMA_h5.parquet
+.venv/Scripts/python -m src.models --model har  --h 22 --data-dir data/dev   # → data/preds/HAR_h22.parquet
 .venv/Scripts/python -m src.models --model ewma --h 5 --lam 0.97                       # → EWMA_0.97_h5 (검증 구간 비교용)
 ```
 
