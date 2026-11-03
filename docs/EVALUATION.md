@@ -23,6 +23,8 @@
 | `mcs_h{h}.csv` | Model Confidence Set (QLIKE). `in_mcs`, `mcs_p`, 빠진 순서 |
 | `sensitivity.csv` | 편입 민감도 Sens_{m,s} (QLIKE), 구간별 이벤트 수 |
 | `no_baseline_post.csv` | 기준 구간이 없는 편입 이벤트의 사후 구간 ln(L^E / L^C) |
+| `event_window.csv` | 편입 이벤트 윈도우 안의 평균 QLIKE·MSE (split, horizon, model) |
+| `horizon_choice.csv` | 7.4 주 예측 기간 선택: EWMA 대비 1단계 모델 평균 QLIKE 개선율 (`docs/TUNING.md` 3절) |
 | `meta.json` | 입력 모델·seed·version, 설정, 건수, prepare의 `reportable`·`hold_reasons` |
 
 ## 2. 계산 방식과 가정
@@ -39,5 +41,5 @@
 
 ## 3. 아직 없는 것
 
-- 7.4 주 예측 기간 선택 규칙: "편입 이벤트 윈도우" 범위 정의가 필요하고, 검증 구간 이벤트가 0건이라(4.1 보류) 지금은 계산할 수 없다.
+- (7.4 주 예측 기간 선택은 `horizon_choice.csv`로 추가됨)
 - 이벤트 윈도우만 떼어 낸 DM·MCS. 지금은 분할 전체로 검정한다.

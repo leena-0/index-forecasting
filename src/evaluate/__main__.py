@@ -11,6 +11,8 @@ data-dir는 src.pipeline prepare의 결과 폴더 (targets_h{h}.parquet, event_p
   mcs_h{h}.csv           Model Confidence Set (QLIKE, T_max)
   sensitivity.csv        편입 민감도 Sens_{m,s} (QLIKE)
   no_baseline_post.csv   기준 구간 없는 편입 이벤트의 사후 구간 ln(L^E / L^C)
+  event_window.csv       편입 이벤트 윈도우 안의 평균 손실 (split, horizon, model)
+  horizon_choice.csv     7.4 주 예측 기간 선택 (EWMA 대비 1단계 모델 평균 QLIKE 개선율)
   meta.json              입력·설정·건수, prepare meta의 reportable·hold_reasons를 그대로 옮김
 """
 import argparse
@@ -26,7 +28,8 @@ from src.pipeline.__main__ import git_commit
 
 from .compare import daily_losses, dm_table, mcs
 from .losses import loss_panel, summary
-from .sensitivity import event_control_losses, no_baseline_post, sensitivity
+from .selection import horizon_choice
+from .sensitivity import event_control_losses, event_window_rows, no_baseline_post, sensitivity
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -63,6 +66,13 @@ def evaluate(pred, data_dir, split, out_dir, alpha=0.10, B=1000, seed=0):
         nbp.append(no_baseline_post(ec).assign(horizon=h))
     sens, nbp = pd.concat(sens, ignore_index=True), pd.concat(nbp, ignore_index=True)
     sens.to_csv(out_dir / "sensitivity.csv", index=False)
+    ew = summary(panel[event_window_rows(panel, phases)])
+    ew.to_csv(out_dir / "event_window.csv", index=False)
+    hc = horizon_choice(ew)
+    if len(hc):
+        hc.to_csv(out_dir / "horizon_choice.csv", index=False)
+        counts["horizon_choice"] = hc.to_dict("records")
+        print(f"\n7.4 주 예측 기간 (편입 이벤트 윈도우, EWMA 대비 평균 QLIKE 개선율):\n{hc.to_string(index=False)}")
     nbp.to_csv(out_dir / "no_baseline_post.csv", index=False)
     counts["sensitivity_events"] = sens.groupby(["horizon", "phase"])["n_events"].max().rename("n") \
         .reset_index().to_dict("records")
