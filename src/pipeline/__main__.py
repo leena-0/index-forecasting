@@ -42,6 +42,19 @@ def git_commit():
         return None
 
 
+def apply_missing_policy(reconciled, policy):
+    """공지일 결합 결과에서 공지가 없는 이벤트 처리 (configs/pipeline.yaml의 events_missing).
+    error = 일대일 대응이 아니면 중단, drop = 공지 누락 이벤트를 빼고 계속.
+    구성종목 변화가 없는 공지(unexpected)는 어느 쪽이든 중단한다.
+    돌려주는 것: (공지일을 붙인 이벤트, 뺀 이벤트)"""
+    if policy not in ("error", "drop"):
+        raise ValueError(f"events_missing은 error 또는 drop이어야 합니다: {policy}")
+    if policy == "drop" and reconciled.unexpected.empty:
+        return reconciled.events, reconciled.missing
+    reconciled.require_complete()
+    return reconciled.events, reconciled.missing
+
+
 def prepare(cfg):
     legacy_dir = cfg.get("legacy_dir") or os.environ.get("LEGACY_DATA_DIR")
     if not legacy_dir:  # openapi도 구성종목·이벤트는 기존 데이터에서 가져온다
@@ -72,11 +85,14 @@ def prepare(cfg):
             path = REPO / path
         announcements = load_announcements(path, cfg["as_of"])
         reconciled = reconcile_events(events, announcements)
-        reconciled.require_complete()
-        events = reconciled.events
+        events, dropped = apply_missing_policy(reconciled, cfg.get("events_missing", "error"))
         data["events"] = events
         counts["announcements"] = len(announcements)
+        counts["events_dropped_no_announcement"] = len(dropped)
         print(f"[events] 실제 공지일 {len(events)}건 결합: {path}")
+        if len(dropped):
+            by_date = dropped.groupby(["effective_date", "event_type"]).size().to_dict()
+            print(f"[events] 공지일이 없어 뺀 이벤트 {len(dropped)}건 (events_missing: drop): {by_date}")
 
     bad = legacy.check_events(events, data["members"], cal)
     print(f"거래일 {len(cal)} ({cal[0].date()} ~ {cal[-1].date()}), 종목 {prices['ticker'].nunique()}, "
@@ -124,6 +140,8 @@ def prepare(cfg):
     hold = ["구성종목·이벤트가 legacy(개발용) 데이터"]
     if not events_path:
         hold.append("공지일이 임시값(편입일)")
+    elif counts["events_dropped_no_announcement"]:
+        hold.append(f"공지일이 없어 뺀 이벤트 {counts['events_dropped_no_announcement']}건")
     if cfg["data_source"] == "dev_legacy":
         hold.append("가격도 legacy(네이버 수정주가)")
     print(f"\n[보류] 최종 결과에 반영하지 않음: {', '.join(hold)}")

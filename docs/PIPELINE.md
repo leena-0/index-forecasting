@@ -61,7 +61,7 @@ t일 특성은 t일 장 마감까지 알 수 있는 값만 쓴다 (3장). 창 �
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `data_source` | `dev_legacy` | 데이터 어댑터. `dev_legacy`(기존 데이터만) / `openapi`(가격·지수는 Open API, 구성종목·이벤트는 기존 데이터) |
+| `data_source` | `openapi` | 데이터 어댑터. `dev_legacy`(기존 데이터만) / `openapi`(가격·지수는 Open API, 구성종목·이벤트는 기존 데이터) |
 | `legacy_dir` | `null` | 기존 데이터 폴더. `null`이면 환경변수 `LEGACY_DATA_DIR`. `openapi`에서도 구성종목·이벤트용으로 필요 |
 | `openapi_dir` | `data/raw/openapi` | Open API 수집 폴더 (`openapi`일 때) |
 | `corporate_action.gap_limit` | `0.30` | 수정 안 된 가격에서 가격 기준 변경일 판정: ratio = 시가/전일 종가가 ratio > 1 + 값 또는 ratio < 1 − 값 (기본 1.3 / 0.7) — 8절 |
@@ -73,7 +73,8 @@ t일 특성은 t일 장 마감까지 알 수 있는 값만 쓴다 (3장). 창 �
 | `yang_zhang.demean` | `true` | Yang–Zhang 분산의 평균 처리 — 아래 3절 |
 | `event_phases` | CLAUDE.md 4.3 | 구간별 기준점(`anchor`: `announce` 공지일 / `effective` 편입일)과 영업일 오프셋 `range: [시작, 끝]`(양 끝 포함). `announce_to_effective`(공지일 ~ 편입일 직전)는 고정 |
 | `placeholder_announce` | `effective` | 공지일이 없을 때 쓰는 임시 공지일. 지금은 편입일만 지원 — 아래 4절 |
-| `events_path` | `null` | 실제 공지일 CSV. 설정하면 기존 구성종목 변화와 일대일 대조한 뒤 실제 공지일을 사용한다. 형식은 `docs/EVENTS.md` |
+| `events_path` | `data/raw/events/announcements.csv` | 실제 공지일 CSV (`python -m src.events from-notices`로 생성). 설정하면 기존 구성종목 변화와 일대일 대조한 뒤 실제 공지일을 사용한다. 형식은 `docs/EVENTS.md`. `null`이면 임시 공지일 |
+| `events_missing` | `drop` | 공지일이 없는 이벤트 처리. `error` = 중단(일대일 대응 필수), `drop` = 빼고 진행(건수는 출력·meta·`hold_reasons`에 남김). 구성종목 변화가 없는 공지는 어느 쪽이든 중단 |
 | `out_dir` | `data/dev` | 결과 저장 폴더 (레포 루트 기준) |
 
 ### 3. `yang_zhang.demean` — n = 5에서의 평균 처리 (CLAUDE.md 5.3)

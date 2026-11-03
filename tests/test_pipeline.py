@@ -266,5 +266,25 @@ class LegacyTest(unittest.TestCase):
         self.assertEqual(len(legacy.check_events(bad, data["members"], data["calendar"])), 2)
 
 
+class MissingPolicyTest(unittest.TestCase):
+    def reconciled(self, missing=0, unexpected=0):
+        from src.events.loader import Reconciliation
+        keys = pd.DataFrame({"ticker": ["000001"] * 2, "event_type": "정기변경", "direction": "편입",
+                             "effective_date": pd.to_datetime(["2023-06-09", "2023-12-15"])})
+        return Reconciliation(events=keys.iloc[:1], missing=keys.iloc[:missing], unexpected=keys.iloc[:unexpected])
+
+    def test_drop_and_error(self):
+        from src.events import EventDataError
+        from src.pipeline.__main__ import apply_missing_policy
+        events, dropped = apply_missing_policy(self.reconciled(missing=1), "drop")
+        self.assertEqual((len(events), len(dropped)), (1, 1))
+        with self.assertRaises(EventDataError):
+            apply_missing_policy(self.reconciled(missing=1), "error")
+        with self.assertRaises(EventDataError):  # 구성종목 변화가 없는 공지는 drop이어도 중단
+            apply_missing_policy(self.reconciled(unexpected=1), "drop")
+        with self.assertRaises(ValueError):
+            apply_missing_policy(self.reconciled(), "skip")
+
+
 if __name__ == "__main__":
     unittest.main()
