@@ -4,13 +4,14 @@
 Open API가 제공하지 않으므로 당분간 기존 개발용 데이터(legacy)에서 가져온다 → 결과는 여전히 개발용.
 
 공통 형식은 legacy.load()와 같고 다음이 추가된다.
+  prices.cmp_prevdd_prc KRX 전일 대비(CMPPREVDD_PRC)를 숫자로 변환한 값
+  prices.fluc_rt        KRX 등락률(FLUC_RT)을 숫자로 변환한 값
+  prices.base_price     당일 기준가 = close - cmp_prevdd_prc
+  prices.base_price_valid
+                       기준가 수익률 계산 가능 여부. 첫 관측일·신규상장일·거래정지일·기준가 오류·
+                       FLUC_RT 검증 실패면 False
   prices.value         거래대금
-  prices.corp_action   분할·증자 등으로 가격 기준이 바뀐 것으로 보이는 날 (True)
-                       Open API 가격은 수정주가가 아니므로, 이날의 야간 수익률 ln(O_t / C_{t-1})은
-                       실제 수익률이 아니다 → target.forward_yz가 이날이 들어간 타깃 구간을 결측으로 둔다.
-                       판정: ratio = O_t / C_{t-1}가 ratio > 1 + gap_limit 또는 ratio < 1 − gap_limit
-                             (가격제한폭 ±30% = 기준가의 0.7 ~ 1.3배 밖 = 기준가 조정)
-                             또는 상장주식수 비율 ≥ shares_ratio 또는 ≤ 1/shares_ratio
+  prices.corp_action   기존 1.3/0.7·주식 수 1.5배 규칙. 기준가 방식과 비교하는 검증용 플래그
   early_end            universe(구성종목 이력에 나온 종목) 중 코스닥 데이터가 as_of 전에 끝나는 종목
                        kind = moved(기존 데이터는 계속됨 → 유가증권 이전 상장 추정) / ended(같이 끝남 → 상장폐지 추정)
   index                코스닥 150 지수 일별 (date, open, high, low, close, volume, value, mcap)
@@ -25,11 +26,13 @@ from . import legacy
 
 INDEX_NAME = "코스닥 150"
 COLS = {"TDD_OPNPRC": "open", "TDD_HGPRC": "high", "TDD_LWPRC": "low", "TDD_CLSPRC": "close",
-        "ACC_TRDVOL": "volume", "ACC_TRDVAL": "value", "MKTCAP": "mcap", "LIST_SHRS": "shares"}
+        "CMPPREVDD_PRC": "cmp_prevdd_prc", "FLUC_RT": "fluc_rt", "ACC_TRDVOL": "volume",
+        "ACC_TRDVAL": "value", "MKTCAP": "mcap", "LIST_SHRS": "shares"}
 IDX_COLS = {"OPNPRC_IDX": "open", "HGPRC_IDX": "high", "LWPRC_IDX": "low", "CLSPRC_IDX": "close",
             "ACC_TRDVOL": "volume", "ACC_TRDVAL": "value", "MKTCAP": "mcap"}
 PRICE_COLS = ["open", "high", "low", "close", "volume"]
 MOVED_GAP_DAYS = 7  # 기존 데이터가 코스닥 데이터보다 이만큼(일) 넘게 이어지면 이전 상장으로 본다
+FLUC_RT_ATOL = 0.011  # FLUC_RT 소수 둘째 자리 반올림 오차(최대 0.005%p)에 여유를 둔다
 
 
 def num(s):
@@ -51,6 +54,35 @@ def flag_corp_actions(prices, gap_limit=0.30, shares_ratio=1.5):
     ratio = prices["shares"] / prev_shares
     jump = (ratio >= shares_ratio) | (ratio <= 1 / shares_ratio)
     return prices.assign(corp_action=(gap | jump).fillna(False).astype(bool))
+
+
+def add_base_prices(prices, listing=None, fluc_rt_atol=FLUC_RT_ATOL):
+    """KRX 일별 기준가와 사용 가능 여부를 붙인다.
+
+    KRX의 CMPPREVDD_PRC는 당일 종가와 당일 기준가의 차이이므로 기준가는
+    ``close - cmp_prevdd_prc``로 복원한다. FLUC_RT는 소수 둘째 자리까지 제공되므로
+    절대 오차 허용치 안에서 ``100 * cmp_prevdd_prc / base_price``와 대조한다.
+    계산한 값과 원본에서 변환한 열은 덮어쓰지 않고 모두 남긴다.
+    """
+    out = prices.copy()
+    out["base_price"] = out["close"] - out["cmp_prevdd_prc"]
+    base_ok = out["base_price"].notna() & (out["base_price"] > 0)
+    expected = 100 * out["cmp_prevdd_prc"] / out["base_price"]
+    formula_ok = base_ok & out["fluc_rt"].notna() & np.isclose(
+        out["fluc_rt"], expected, rtol=0, atol=fluc_rt_atol, equal_nan=False)
+
+    first = out.groupby("ticker", sort=False).cumcount().eq(0)
+    new_listing = pd.Series(False, index=out.index)
+    if listing is not None and not listing.empty:
+        list_dates = listing.drop_duplicates("ticker").set_index("ticker")["list_date"]
+        new_listing = out["date"].eq(out["ticker"].map(list_dates))
+    active = (out[["open", "high", "low", "close"]].notna().all(axis=1)
+              & (out[["open", "high", "low", "close"]] > 0).all(axis=1)
+              & out["volume"].notna() & (out["volume"] > 0))
+
+    out["base_price_formula_valid"] = formula_ok.astype(bool)
+    out["base_price_valid"] = (base_ok & formula_ok & active & ~first & ~new_listing).astype(bool)
+    return out
 
 
 def load(openapi_dir, legacy_dir, as_of, placeholder_announce="effective", gap_limit=0.30, shares_ratio=1.5):
@@ -108,6 +140,8 @@ def load(openapi_dir, legacy_dir, as_of, placeholder_announce="effective", gap_l
                    .groupby("ISU_SRT_CD")["list_date"].min().rename_axis("ticker").reset_index())
     else:
         listing = pd.DataFrame(columns=["ticker", "list_date"])
+
+    prices = add_base_prices(prices, listing)
 
     return {"calendar": calendar, "prices": prices, "members": members, "events": events,
             "index": index, "early_end": early_end, "members_until": last_member_day, "listing": listing}
