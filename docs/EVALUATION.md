@@ -11,7 +11,7 @@
 .venv/Scripts/python -m src.evaluate --pred 예측1.parquet 예측2.parquet --data-dir data/dev --split val
 ```
 
-- `--split test`는 `--final`을 함께 줘야 실행된다. 테스트 구간은 한 번만 본다 (CLAUDE.md 4.1).
+- `--split test`는 `--final`을 함께 줘야 실행된다. 테스트 구간은 한 번만 본다 (CLAUDE.md 4.1, 열람 기록도 여기에 있다).
 - `--alpha`(MCS 유의수준, 기본 0.10), `--B`(부트스트랩 횟수, 기본 1000), `--seed`(기본 0), `--out`(기본 `data/eval/<split>`)
 
 예측 테이블 열 (CLAUDE.md 6.2): `ticker, origin_date, horizon(5|22), pred_log_var, model, seed, version`
@@ -24,7 +24,7 @@
 | `sensitivity.csv` | 편입 민감도 Sens_{m,s} (QLIKE), 구간별 이벤트 수 |
 | `no_baseline_post.csv` | 기준 구간이 없는 편입 이벤트의 사후 구간 ln(L^E / L^C) |
 | `event_window.csv` | 편입 이벤트 윈도우 안의 평균 QLIKE·MSE (split, horizon, model) |
-| `horizon_choice.csv` | 7.4 주 예측 기간 선택: EWMA 대비 1단계 모델 평균 QLIKE 개선율 (`docs/TUNING.md` 3절) |
+| `horizon_choice.csv` | 7.4 주 예측 기간 선택: EWMA 대비 1단계 모델 평균 QLIKE 개선율 (`docs/TUNING.md` 3절). 7.4는 검증 구간 규칙이라 `--split val`의 파일만 쓴다 (테스트 평가에도 만들어지지만 쓰지 않는다) |
 | `meta.json` | 입력 모델·seed·version, 설정, 건수, prepare의 `reportable`·`hold_reasons` |
 
 ## 2. 계산 방식과 가정
