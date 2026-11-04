@@ -69,11 +69,26 @@ def prepare(cfg):
         universe = set(data["members"]["ticker"])
         data["prices"] = data["prices"][data["prices"]["ticker"].isin(universe)].reset_index(drop=True)
         ee = data["early_end"]
-        counts["corp_action_days"] = int(data["prices"]["corp_action"].sum())
+        op = data["prices"]
+        previous_close = op.groupby("ticker", sort=False)["close"].shift(1)
+        previous_close_valid = (op[["open", "close"]].notna().all(axis=1)
+                                & (op[["open", "close"]] > 0).all(axis=1)
+                                & previous_close.notna() & (previous_close > 0)
+                                & ~op["corp_action"])
+        counts["corp_action_days"] = int(op["corp_action"].sum())
+        counts["previous_close_method_excluded_rows"] = int((~previous_close_valid).sum())
+        counts["base_price_excluded_rows"] = int((~op["base_price_valid"]).sum())
+        counts["base_price_formula_invalid_rows"] = int((~op["base_price_formula_valid"]).sum())
+        counts["base_price_recovered_corp_action_rows"] = int(
+            (op["corp_action"] & op["base_price_valid"]).sum())
         counts["early_end"] = ee["kind"].value_counts().to_dict()
         counts["moved_tickers"] = ee.loc[ee["kind"] == "moved", "ticker"].tolist()
         print(f"[openapi] 구성종목·이벤트는 기존 데이터({data['members_until'].date()}까지), "
-              f"가격 기준 변경일 표시 {counts['corp_action_days']}건, "
+              f"기존 전일 종가 방식 제외 {counts['previous_close_method_excluded_rows']}행 "
+              f"(기업행사 규칙 {counts['corp_action_days']}일) / 기준가 방식 제외 "
+              f"{counts['base_price_excluded_rows']}행 (검증식 불일치·계산 불가 "
+              f"{counts['base_price_formula_invalid_rows']}행, 기존 규칙 중 기준가로 복원 "
+              f"{counts['base_price_recovered_corp_action_rows']}행), "
               f"코스닥 데이터가 일찍 끝나는 종목 {counts['early_end']} (moved = 유가증권 이전 상장 추정)")
     else:
         raise ValueError(f"지원하지 않는 data_source: {cfg['data_source']}")

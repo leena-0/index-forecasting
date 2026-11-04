@@ -25,9 +25,10 @@ def idx_row(d, name):
             "CLSPRC_IDX": "1,000.5", "ACC_TRDVOL": "1", "ACC_TRDVAL": "1"}
 
 
-def daily_row(d, code="000001", o="100", h="110", l="90", c="105", v="10"):
+def daily_row(d, code="000001", o="100", h="110", l="90", c="105", v="10", cmp="5", fluc="5.00"):
     return {"BAS_DD": d, "ISU_CD": code, "ISU_NM": "가", "TDD_OPNPRC": o, "TDD_HGPRC": h, "TDD_LWPRC": l,
-            "TDD_CLSPRC": c, "ACC_TRDVOL": v, "ACC_TRDVAL": "1", "MKTCAP": "1", "LIST_SHRS": "1"}
+            "TDD_CLSPRC": c, "CMPPREVDD_PRC": cmp, "FLUC_RT": fluc,
+            "ACC_TRDVOL": v, "ACC_TRDVAL": "1", "MKTCAP": "1", "LIST_SHRS": "1"}
 
 
 class FakeBudget:
@@ -249,16 +250,18 @@ class OpenApiAdapterTest(unittest.TestCase):
                            "CLSPRC_IDX": "9", "ACC_TRDVOL": "", "ACC_TRDVAL": "", "MKTCAP": ""}]).to_parquet(
                 self.api / f"kosdaq_index/date={d}.parquet")
         pd.DataFrame().to_parquet(self.api / "kosdaq_index/date=20150717.parquet")  # 휴장일(가정)
-        row = lambda t, o, h, l, c, v, sh: {"ISU_CD": t, "TDD_OPNPRC": o, "TDD_HGPRC": h, "TDD_LWPRC": l,
-                                            "TDD_CLSPRC": c, "ACC_TRDVOL": v, "ACC_TRDVAL": "5",
-                                            "MKTCAP": "1,000", "LIST_SHRS": sh}
+        row = lambda t, o, h, l, c, v, sh, cmp, fluc: {
+            "ISU_CD": t, "TDD_OPNPRC": o, "TDD_HGPRC": h, "TDD_LWPRC": l, "TDD_CLSPRC": c,
+            "CMPPREVDD_PRC": cmp, "FLUC_RT": fluc, "ACC_TRDVOL": v, "ACC_TRDVAL": "5",
+            "MKTCAP": "1,000", "LIST_SHRS": sh}
         daily = {
-            "20150713": [row("000001", "10", "11", "9", "10", "5", "100"), row("000009", "1", "1", "1", "1", "1", "1")],
-            "20150714": [row("000001", "0", "0", "0", "10", "0", "100")],                 # 거래정지
-            "20150715": [row("000001", "11", "12", "10", "11", "6", "100"),
-                         row("000002", "20", "21", "19", "20", "1", "50")],
-            "20150716": [row("000001", "60", "61", "59", "60", "7", "100"),               # 시가 갭 +445% → 기준 변경
-                         row("000002", "4", "4.5", "3.9", "4", "9", "250")],               # 주식수 5배 → 기준 변경
+            "20150713": [row("000001", "10", "11", "9", "10", "5", "100", "0", "0"),
+                         row("000009", "1", "1", "1", "1", "1", "1", "0", "0")],
+            "20150714": [row("000001", "0", "0", "0", "10", "0", "100", "0", "0")],  # 거래정지
+            "20150715": [row("000001", "11", "12", "10", "11", "6", "100", "1", "10"),
+                         row("000002", "20", "21", "19", "20", "1", "50", "0", "0")],
+            "20150716": [row("000001", "60", "61", "59", "60", "7", "100", "49", "445.45"),
+                         row("000002", "4", "4.5", "3.9", "4", "9", "250", "0", "0")],
         }
         for d, rows in daily.items():
             pd.DataFrame(rows).to_parquet(self.api / f"kosdaq_daily/date={d}.parquet")
@@ -274,6 +277,8 @@ class OpenApiAdapterTest(unittest.TestCase):
         p = data["prices"].set_index(["ticker", "date"])
         self.assertTrue(np.isnan(p.loc[("000001", pd.Timestamp("2015-07-14")), "close"]))  # 거래정지
         self.assertEqual(p.loc[("000001", pd.Timestamp("2015-07-13")), "mcap"], 1000)
+        self.assertEqual(p.loc[("000001", pd.Timestamp("2015-07-15")), "cmp_prevdd_prc"], 1)
+        self.assertEqual(p.loc[("000001", pd.Timestamp("2015-07-15")), "base_price"], 10)
         self.assertIn("000009", p.index.get_level_values(0))                       # 시장 전체 (universe 필터는 prepare에서)
 
     def test_corp_action_flags(self):
@@ -283,6 +288,16 @@ class OpenApiAdapterTest(unittest.TestCase):
         self.assertFalse(p[("000001", pd.Timestamp("2015-07-15"))])  # 직전 행이 거래정지(결측) → 판정 안 함
         self.assertEqual(int(p.sum()), 2)
 
+    def test_base_price_validity_and_corp_action_recovery(self):
+        p = self.load()["prices"].set_index(["ticker", "date"])
+        first = ("000002", pd.Timestamp("2015-07-15"))
+        adjusted = ("000001", pd.Timestamp("2015-07-16"))
+        halt = ("000001", pd.Timestamp("2015-07-14"))
+        self.assertFalse(p.loc[first, "base_price_valid"])       # 종목 첫 관측일
+        self.assertFalse(p.loc[halt, "base_price_valid"])        # 거래정지일
+        self.assertTrue(p.loc[adjusted, "base_price_valid"])     # 기존 규칙은 잡지만 기준가는 복원 가능
+        self.assertTrue(p.loc[adjusted, "corp_action"])
+
     def test_members_events_from_legacy(self):
         data = self.load()
         self.assertEqual(len(data["events"]), 2)
@@ -291,7 +306,8 @@ class OpenApiAdapterTest(unittest.TestCase):
     def test_early_end(self):
         (self.api / "kosdaq_daily/date=20150716.parquet").unlink()
         pd.DataFrame([{"ISU_CD": "000002", "TDD_OPNPRC": "20", "TDD_HGPRC": "21", "TDD_LWPRC": "19",
-                       "TDD_CLSPRC": "20", "ACC_TRDVOL": "1", "ACC_TRDVAL": "1", "MKTCAP": "1",
+                       "TDD_CLSPRC": "20", "CMPPREVDD_PRC": "0", "FLUC_RT": "0", "ACC_TRDVOL": "1",
+                       "ACC_TRDVAL": "1", "MKTCAP": "1",
                        "LIST_SHRS": "50"}]).to_parquet(self.api / "kosdaq_daily/date=20150716.parquet")
         orig = openapi.MOVED_GAP_DAYS
         openapi.MOVED_GAP_DAYS = 0
@@ -356,6 +372,61 @@ class CorpActionTargetTest(unittest.TestCase):
         self.assertTrue(a.loc[cal[25]:cal[29]].isna().all())   # 구간에 30일의 야간 수익률이 들어감
         self.assertTrue(np.isfinite(a.loc[cal[24]]))
         self.assertTrue(np.isfinite(a.loc[cal[30]]))           # 구간 31~35 (o_1 = 31일 시가 / 30일 종가)
+
+
+class BasePriceTest(unittest.TestCase):
+    def prices(self, n=60):
+        cal = pd.bdate_range("2022-01-03", periods=n)
+        close = 100 * np.exp(np.arange(n) * 0.001)
+        base = np.r_[close[0], close[:-1]]
+        p = pd.DataFrame({"date": cal, "ticker": "A", "open": base * 1.001,
+                          "high": base * 1.012, "low": base * 0.992, "close": close,
+                          "volume": 100.0, "shares": 1000.0, "mcap": close * 1000,
+                          "cmp_prevdd_prc": close - base,
+                          "fluc_rt": 100 * (close - base) / base})
+        p["base_price"] = base
+        p["base_price_valid"] = True
+        p.loc[0, "base_price_valid"] = False
+        return cal, p
+
+    def test_normal_days_match_previous_close_method(self):
+        cal, p = self.prices()
+        legacy = p.drop(columns=["cmp_prevdd_prc", "fluc_rt", "base_price", "base_price_valid"])
+        old = forward_yz(legacy, cal, 5).set_index("origin_date")["yz_var"]
+        new = forward_yz(p, cal, 5).set_index("origin_date")["yz_var"]
+        pd.testing.assert_series_equal(old.iloc[1:-5], new.iloc[1:-5])
+
+    def test_split_like_jump_uses_base_price_instead_of_dropping_window(self):
+        cal, p = self.prices()
+        i = 30
+        p.loc[i, ["open", "high", "low", "close"]] = [50, 53, 49, 52]
+        p.loc[i, ["cmp_prevdd_prc", "base_price"]] = [2, 50]
+        p.loc[i, "fluc_rt"] = 4
+        p["corp_action"] = False
+        p.loc[i, "corp_action"] = True
+        new = forward_yz(p, cal, 5).set_index("origin_date")["yz_var"]
+        self.assertTrue(np.isfinite(new.loc[cal[i - 5:i]]).all())
+
+        old = p.drop(columns=["cmp_prevdd_prc", "fluc_rt", "base_price", "base_price_valid"])
+        dropped = forward_yz(old, cal, 5).set_index("origin_date")["yz_var"]
+        self.assertTrue(dropped.loc[cal[i - 5:i]].isna().all())
+
+    def test_invalid_formula_halt_first_observation_and_listing(self):
+        cal, p = self.prices(n=7)
+        listing = pd.DataFrame({"ticker": ["A"], "list_date": [cal[3]]})
+        p = p.drop(columns=["base_price", "base_price_valid"])
+        p.loc[1, "cmp_prevdd_prc"] = p.loc[1, "close"]  # base_price = 0
+        p.loc[2, "fluc_rt"] += 1
+        p.loc[4, ["open", "high", "low", "volume"]] = 0
+        p.loc[5, "cmp_prevdd_prc"] = np.nan
+        out = openapi.add_base_prices(p, listing)
+        self.assertFalse(out.loc[0, "base_price_valid"])  # 첫 관측일
+        self.assertFalse(out.loc[1, "base_price_valid"])  # 0 이하 기준가
+        self.assertFalse(out.loc[2, "base_price_valid"])  # 내부 검증식 불일치
+        self.assertFalse(out.loc[3, "base_price_valid"])  # 신규상장일
+        self.assertFalse(out.loc[4, "base_price_valid"])  # 거래정지일
+        self.assertFalse(out.loc[5, "base_price_valid"])  # 결측 기준가
+        self.assertTrue(out.loc[6, "base_price_valid"])
 
 
 if __name__ == "__main__":
