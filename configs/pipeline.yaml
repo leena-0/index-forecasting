@@ -23,7 +23,7 @@ as_of: "2024-12-30"
 
 # 고정 분할 (CLAUDE.md 4.1). 테스트 = val_end 다음 날 ~ as_of
 split:
-  train_end: "2022-12-31"
+  train_end: "2021-12-31"
   val_end: "2023-12-31"
 
 # 예측 기간 h (영업일). 분할 경계마다 h일씩 비운다 (CLAUDE.md 3장)
