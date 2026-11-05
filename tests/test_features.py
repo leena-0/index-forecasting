@@ -109,6 +109,23 @@ class FeatureTest(unittest.TestCase):
         self.assertAlmostEqual(got["rv_d"], u * (u - c) + d * (d - c))
 
 
+class ShareLagFeatureTest(unittest.TestCase):
+    def test_share_lag_adjusts_mcap_and_turnover(self):
+        cal, p = make_prices()
+        members = pd.DataFrame({"date": cal[30:], "ticker": "A"})
+        plain = build_features(p, cal, members).set_index(["ticker", "date"])
+        lagged = p.assign(share_lag=0.0)
+        row = (lagged["ticker"] == "A") & (lagged["date"] == cal[35])
+        lagged.loc[row, "share_lag"] = math.log(2)
+        adj = build_features(lagged, cal, members).set_index(["ticker", "date"])
+        key = ("A", cal[35])
+        self.assertAlmostEqual(adj.loc[key, "log_mcap"], plain.loc[key, "log_mcap"] + math.log(2))
+        self.assertAlmostEqual(adj.loc[key, "log_turnover"], plain.loc[key, "log_turnover"] - math.log(2))
+        self.assertAlmostEqual(adj.loc[key, "rv_d"], plain.loc[key, "rv_d"])
+        other = ("A", cal[36])
+        self.assertAlmostEqual(adj.loc[other, "log_mcap"], plain.loc[other, "log_mcap"])
+
+
 class LoadPanelTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

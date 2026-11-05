@@ -378,6 +378,56 @@ class CorpActionTargetTest(unittest.TestCase):
         self.assertTrue(np.isfinite(a.loc[cal[30]]))           # 구간 31~35 (o_1 = 31일 시가 / 30일 종가)
 
 
+class ShareLagTest(unittest.TestCase):
+    def prices(self, base_ratio=0.5, n=12, ex=4, listed=8, new_shares=2000.0):
+        """ex일에 기준가가 base_ratio배가 되고 listed일에 상장주식수가 바뀐다."""
+        close = np.r_[np.full(ex, 100.0), np.full(n - ex, 100.0 * base_ratio)]
+        base = np.r_[close[0], close[:-1]]
+        base[ex] = close[ex]
+        shares = np.r_[np.full(listed, 1000.0), np.full(n - listed, new_shares)]
+        return pd.DataFrame({"date": pd.bdate_range("2022-01-03", periods=n), "ticker": "A", "open": close,
+                             "close": close, "base_price": base, "shares": shares, "mcap": close * shares})
+
+    def test_lag_until_shares_are_listed(self):
+        lag = openapi.add_share_lag(self.prices())["share_lag"].to_numpy()
+        np.testing.assert_allclose(lag[4:8], np.log(2))
+        np.testing.assert_allclose(lag[:4], 0)
+        np.testing.assert_allclose(lag[8:], 0)
+
+    def test_adjusted_mcap_is_continuous(self):
+        p = openapi.add_share_lag(self.prices())
+        adj = np.log(p["mcap"]) + p["share_lag"]
+        np.testing.assert_allclose(adj, adj.iloc[0])
+
+    def test_same_day_listing_has_no_lag(self):
+        self.assertTrue((openapi.add_share_lag(self.prices(listed=4))["share_lag"] == 0).all())
+
+    def test_small_change_and_price_rise_are_ignored(self):
+        for ratio in (0.97, 2.0):
+            lag = openapi.add_share_lag(self.prices(base_ratio=ratio, new_shares=1000.0))["share_lag"]
+            self.assertTrue((lag == 0).all())
+
+    def test_expires_when_never_listed(self):
+        n = openapi.SHARE_LAG_MAX_DAYS + 10
+        lag = openapi.add_share_lag(self.prices(n=n, listed=n))["share_lag"].to_numpy()
+        self.assertGreater(lag[4 + openapi.SHARE_LAG_MAX_DAYS], 0)
+        self.assertEqual(lag[5 + openapi.SHARE_LAG_MAX_DAYS], 0)
+
+    def test_small_issue_does_not_settle_large_lag(self):
+        self.assertGreater(openapi.add_share_lag(self.prices(new_shares=1010.0))["share_lag"].iloc[8], 0)
+
+    def test_shares_changed_during_halt_count_as_listed(self):
+        p = self.prices(listed=3)  # 거래정지 중 주식수가 먼저 바뀌고 재개일에 기준가가 바뀐다
+        p.loc[3, ["open", "close"]] = np.nan
+        self.assertTrue((openapi.add_share_lag(p)["share_lag"] == 0).all())
+
+    def test_no_future_leak(self):
+        p = self.prices()
+        full = openapi.add_share_lag(p)["share_lag"].to_numpy()
+        cut = openapi.add_share_lag(p.iloc[:6])["share_lag"].to_numpy()
+        np.testing.assert_allclose(full[:6], cut)
+
+
 class BasePriceTest(unittest.TestCase):
     def prices(self, n=60):
         cal = pd.bdate_range("2022-01-03", periods=n)

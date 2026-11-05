@@ -80,6 +80,8 @@ def prepare(cfg):
         counts["base_price_excluded_rows"] = int((~op["base_price_valid"]).sum())
         counts["base_price_formula_invalid_rows"] = int((~op["base_price_formula_valid"]).sum())
         counts["base_price_after_halt_rows"] = int(op["base_price_after_halt"].sum())
+        counts["share_lag_rows"] = int((op["share_lag"] > 0).sum())
+        counts["share_lag_tickers"] = int(op.loc[op["share_lag"] > 0, "ticker"].nunique())
         counts["base_price_recovered_corp_action_rows"] = int(
             (op["corp_action"] & op["base_price_valid"]).sum())
         counts["early_end"] = ee["kind"].value_counts().to_dict()
@@ -91,6 +93,7 @@ def prepare(cfg):
               f"{counts['base_price_formula_invalid_rows']}행, 거래정지 직후 "
               f"{counts['base_price_after_halt_rows']}행, 기존 규칙 중 기준가로 복원 "
               f"{counts['base_price_recovered_corp_action_rows']}행), "
+              f"주식수 시차 보정 {counts['share_lag_rows']}행·{counts['share_lag_tickers']}종목, "
               f"코스닥 데이터가 일찍 끝나는 종목 {counts['early_end']} (moved = 유가증권 이전 상장 추정)")
     else:
         raise ValueError(f"지원하지 않는 data_source: {cfg['data_source']}")
