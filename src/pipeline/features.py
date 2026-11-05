@@ -8,8 +8,9 @@
     rv_m  = (1/22) Σ_{j=0}^{21} rv_d_{t−j}
     yz_5, yz_22 = 구간 t−h+1 ~ t의 Yang–Zhang 분산 (타깃과 같은 정의 — origin t−h의 타깃, target.forward_yz)
     ret   = ln(C_t / R_t)                                기준가 대비 종가 수익률
-    log_turnover = ln(volume_t / shares_t)
-    log_mcap     = ln(mcap_t)
+    log_turnover = ln(volume_t / shares_t) − share_lag_t
+    log_mcap     = ln(mcap_t) + share_lag_t
+                   share_lag_t = 권리락·분할 뒤 아직 반영되지 않은 상장주식수 변화 (openapi.add_share_lag, legacy는 0)
     is_member    = t일 구성종목 여부
     n_obs        = 종목의 첫 행부터 t까지 달력상 거래일 수 (이력 길이, CLAUDE.md 6.3)
 
@@ -29,7 +30,7 @@ FEATURES = ["rv_d", "rv_w", "rv_m", "yz_5", "yz_22", "ret", "log_turnover", "log
 
 def build_features(prices, calendar, members, demean=True):
     """prices: DataFrame[date, ticker, open, high, low, close, volume, mcap, shares]
-    Open API 입력은 base_price, base_price_valid를, legacy 호환 입력은 corp_action을 추가로 가질 수 있다.
+    Open API 입력은 base_price, base_price_valid, share_lag를, legacy 호환 입력은 corp_action을 추가로 가질 수 있다.
     members: DataFrame[date, ticker]. 돌려주는 것: DataFrame[ticker, date] + FEATURES."""
     out = []
     for ticker, g in prices.groupby("ticker", sort=True):
@@ -51,12 +52,13 @@ def build_features(prices, calendar, members, demean=True):
         u = np.log(g["high"] / g["open"])
         d = np.log(g["low"] / g["open"])
         rv_d = o ** 2 + u * (u - c) + d * (d - c)
+        lag = g["share_lag"].fillna(0.0) if "share_lag" in g else 0.0
         out.append(pd.DataFrame({
             "ticker": ticker, "date": days, "rv_d": rv_d.values,
             "rv_w": rv_d.rolling(5, min_periods=5).mean().values,
             "rv_m": rv_d.rolling(22, min_periods=22).mean().values,
-            "ret": ret.values, "log_turnover": np.log(g["volume"] / g["shares"]).values,
-            "log_mcap": np.log(g["mcap"]).values, "n_obs": np.arange(1, len(days) + 1)}))
+            "ret": ret.values, "log_turnover": (np.log(g["volume"] / g["shares"]) - lag).values,
+            "log_mcap": (np.log(g["mcap"]) + lag).values, "n_obs": np.arange(1, len(days) + 1)}))
     f = pd.concat(out, ignore_index=True)
     for h in (5, 22):  # 구간 t−h+1 ~ t = origin t−h의 타깃
         yz = forward_yz(prices, calendar, h, demean)
