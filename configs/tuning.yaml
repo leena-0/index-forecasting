@@ -1,45 +1,46 @@
 # 하이퍼파라미터 그리드 (python -m src.tune, docs/TUNING.md)
 # 모델 이름 → {파라미터: [후보, ...]}. 모든 조합을 학습하고, 각 조합마다 편향 보정 없음/있음을 함께 평가한다.
 # 선택 기준: 검증 구간(2022~2023) 평균 QLIKE. 테스트 구간은 쓰지 않는다.
+# 범위: 2026-11-03 튜닝에서 선택이 범위 끝에 걸린 축만 넓혔다. 계산량을 줄이려고 뚜렷하게 진 값은 뺐다 (docs/TUNING.md 2절).
 
 ewma:
-  lam: [0.90, 0.94, 0.97, 0.99]
+  lam: [0.90, 0.94, 0.97, 0.99, 0.995]
 
 har: {}   # 하이퍼파라미터 없음 (편향 보정 유무만 비교)
 
 lgbm:
-  learning_rate: [0.03, 0.1]
-  num_leaves: [15, 63]
-  min_data_in_leaf: [100, 1000]
-  num_boost_round: [200, 600]
+  learning_rate: [0.01, 0.03]
+  num_leaves: [7, 15, 31]
+  min_data_in_leaf: [30, 100, 1000, 3000]
+  num_boost_round: [100, 200, 400]
 
 lstm:
-  lookback: [22, 44]
-  hidden: [16, 64]
-  epochs: [5, 10]
+  lookback: [44, 66]
+  hidden: [8, 16]
+  epochs: [10, 20]
 
 # ── 2단계 ──
 gru:
-  lookback: [22, 44]
-  hidden: [16, 64]
-  epochs: [5, 10]
+  lookback: [44, 66]
+  hidden: [8, 16]
+  epochs: [5, 10, 20]
 
 garch:
   mean: [zero, demean]
-  min_obs: [250, 500]
+  min_obs: [120, 250, 500]
 
 gnn:
-  k: [5, 10]
-  hidden: [16, 32]
-  epochs: [5, 10]
+  k: [3, 5]
+  hidden: [32, 64]
+  epochs: [3, 5]
 
 # ── 3단계 ──
 tcn:
-  lookback: [22, 44]
-  hidden: [16, 32]
+  lookback: [22, 44, 66]
+  hidden: [32, 64]
   epochs: [5, 10]
 
 transformer:
-  lookback: [22, 44]
+  lookback: [22, 44, 66]
   hidden: [16, 32]
-  layers: [1, 2]
+  layers: [2, 3]
