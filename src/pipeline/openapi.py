@@ -8,8 +8,10 @@ Open API가 제공하지 않으므로 당분간 기존 개발용 데이터(legac
   prices.fluc_rt        KRX 등락률(FLUC_RT)을 숫자로 변환한 값
   prices.base_price     당일 기준가 = close - cmp_prevdd_prc
   prices.base_price_valid
-                       기준가 수익률 계산 가능 여부. 첫 관측일·신규상장일·거래정지일·기준가 오류·
+                       기준가 수익률 계산 가능 여부. 첫 관측일·신규상장일·거래정지일·거래정지 직후·기준가 오류·
                        FLUC_RT 검증 실패면 False
+  prices.base_price_after_halt
+                       거래정지 직후(직전 거래일에 거래가 없거나 행이 없는 날) 여부
   prices.value         거래대금
   prices.corp_action   기존 1.3/0.7·주식 수 1.5배 규칙. 기준가 방식과 비교하는 검증용 플래그
   early_end            universe(구성종목 이력에 나온 종목) 중 코스닥 데이터가 as_of 전에 끝나는 종목
@@ -56,12 +58,14 @@ def flag_corp_actions(prices, gap_limit=0.30, shares_ratio=1.5):
     return prices.assign(corp_action=(gap | jump).fillna(False).astype(bool))
 
 
-def add_base_prices(prices, listing=None, fluc_rt_atol=FLUC_RT_ATOL):
+def add_base_prices(prices, listing=None, fluc_rt_atol=FLUC_RT_ATOL, calendar=None):
     """KRX 일별 기준가와 사용 가능 여부를 붙인다.
 
     KRX의 CMPPREVDD_PRC는 당일 종가와 당일 기준가의 차이이므로 기준가는
     ``close - cmp_prevdd_prc``로 복원한다. FLUC_RT는 소수 둘째 자리까지 제공되므로
     절대 오차 허용치 안에서 ``100 * cmp_prevdd_prc / base_price``와 대조한다.
+    거래정지 직후는 정지 기간의 변화가 하루 값에 몰리므로 계산하지 않는다 (CLAUDE.md 5.3).
+    calendar를 주면 달력상 직전 거래일에 행이 없는 날도 거래정지 직후로 본다.
     계산한 값과 원본에서 변환한 열은 덮어쓰지 않고 모두 남긴다.
     """
     out = prices.copy()
@@ -79,9 +83,15 @@ def add_base_prices(prices, listing=None, fluc_rt_atol=FLUC_RT_ATOL):
     active = (out[["open", "high", "low", "close"]].notna().all(axis=1)
               & (out[["open", "high", "low", "close"]] > 0).all(axis=1)
               & out["volume"].notna() & (out["volume"] > 0))
+    prev_active = active.astype(float).groupby(out["ticker"], sort=False).shift(1).eq(1.0)
+    if calendar is not None:
+        pos = pd.Series(pd.DatetimeIndex(calendar).get_indexer(out["date"]), index=out.index)
+        prev_active &= pos.groupby(out["ticker"], sort=False).diff().eq(1)
+    after_halt = active & ~first & ~prev_active
 
     out["base_price_formula_valid"] = formula_ok.astype(bool)
-    out["base_price_valid"] = (base_ok & formula_ok & active & ~first & ~new_listing).astype(bool)
+    out["base_price_after_halt"] = after_halt.astype(bool)
+    out["base_price_valid"] = (base_ok & formula_ok & active & ~first & ~new_listing & ~after_halt).astype(bool)
     return out
 
 
@@ -141,7 +151,7 @@ def load(openapi_dir, legacy_dir, as_of, placeholder_announce="effective", gap_l
     else:
         listing = pd.DataFrame(columns=["ticker", "list_date"])
 
-    prices = add_base_prices(prices, listing)
+    prices = add_base_prices(prices, listing, calendar=calendar)
 
     return {"calendar": calendar, "prices": prices, "members": members, "events": events,
             "index": index, "early_end": early_end, "members_until": last_member_day, "listing": listing}

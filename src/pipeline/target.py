@@ -18,7 +18,7 @@ h일 구간(i = 1, …, n, n = h)에 대해
 타깃(origin t) = 구간 t+1 ~ t+h의 σYZ² (일 단위 분산).
 legacy의 o_1에는 t의 종가가, Open API의 o_1에는 t+1의 KRX 기준가가 들어간다.
 구간 안에 결측(거래정지, 상장 전, 데이터 끝)이 하나라도 있으면 NaN — 보간하지 않는다.
-Open API는 base_price_valid가 False인 첫 관측일·신규상장일·거래정지일·검증 실패일의 o를 NaN으로 둔다.
+Open API는 base_price_valid가 False인 첫 관측일·신규상장일·거래정지일·거래정지 직후·검증 실패일의 o를 NaN으로 둔다.
 legacy는 거래정지 다음 날도 직전 종가가 없으므로 o가 NaN이고, corp_action 열이 있으면 그날의 o를 NaN으로 둔다.
 """
 import numpy as np
