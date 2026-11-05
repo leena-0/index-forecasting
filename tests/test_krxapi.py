@@ -295,6 +295,10 @@ class OpenApiAdapterTest(unittest.TestCase):
         halt = ("000001", pd.Timestamp("2015-07-14"))
         self.assertFalse(p.loc[first, "base_price_valid"])       # 종목 첫 관측일
         self.assertFalse(p.loc[halt, "base_price_valid"])        # 거래정지일
+        after_halt = ("000001", pd.Timestamp("2015-07-15"))
+        self.assertFalse(p.loc[after_halt, "base_price_valid"])  # 거래정지 직후 (CLAUDE.md 5.3)
+        self.assertTrue(p.loc[after_halt, "base_price_after_halt"])
+        self.assertEqual(p.loc[after_halt, "base_price"], 10)    # 기준가 값은 남긴다
         self.assertTrue(p.loc[adjusted, "base_price_valid"])     # 기존 규칙은 잡지만 기준가는 복원 가능
         self.assertTrue(p.loc[adjusted, "corp_action"])
 
@@ -425,8 +429,28 @@ class BasePriceTest(unittest.TestCase):
         self.assertFalse(out.loc[2, "base_price_valid"])  # 내부 검증식 불일치
         self.assertFalse(out.loc[3, "base_price_valid"])  # 신규상장일
         self.assertFalse(out.loc[4, "base_price_valid"])  # 거래정지일
-        self.assertFalse(out.loc[5, "base_price_valid"])  # 결측 기준가
+        self.assertFalse(out.loc[5, "base_price_valid"])  # 거래정지 직후 (결측 기준가이기도 함)
+        self.assertTrue(out.loc[5, "base_price_after_halt"])
         self.assertTrue(out.loc[6, "base_price_valid"])
+
+    def test_day_after_missing_row_counts_as_after_halt(self):
+        cal, p = self.prices(n=7)
+        p = p.drop(columns=["base_price", "base_price_valid"]).drop(index=3).reset_index(drop=True)
+        out = openapi.add_base_prices(p, calendar=cal).set_index("date")
+        self.assertFalse(out.loc[cal[4], "base_price_valid"])  # 달력상 직전 거래일 행이 없음
+        self.assertTrue(out.loc[cal[5], "base_price_valid"])
+        no_cal = openapi.add_base_prices(p).set_index("date")
+        self.assertTrue(no_cal.loc[cal[4], "base_price_valid"])
+
+    def test_after_halt_day_is_not_in_target(self):
+        cal, p = self.prices()
+        p = p.drop(columns=["base_price", "base_price_valid"])
+        p.loc[30, ["open", "high", "low", "volume"]] = np.nan
+        p.loc[30, "close"] = np.nan
+        out = openapi.add_base_prices(p, calendar=cal)
+        a = forward_yz(out, cal, 5).set_index("origin_date")["yz_var"]
+        self.assertTrue(a.loc[cal[26]:cal[30]].isna().all())  # 구간에 30일 또는 31일이 들어감
+        self.assertTrue(np.isfinite(a.loc[cal[31]]))
 
 
 if __name__ == "__main__":

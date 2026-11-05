@@ -79,6 +79,7 @@ def prepare(cfg):
         counts["previous_close_method_excluded_rows"] = int((~previous_close_valid).sum())
         counts["base_price_excluded_rows"] = int((~op["base_price_valid"]).sum())
         counts["base_price_formula_invalid_rows"] = int((~op["base_price_formula_valid"]).sum())
+        counts["base_price_after_halt_rows"] = int(op["base_price_after_halt"].sum())
         counts["base_price_recovered_corp_action_rows"] = int(
             (op["corp_action"] & op["base_price_valid"]).sum())
         counts["early_end"] = ee["kind"].value_counts().to_dict()
@@ -87,7 +88,8 @@ def prepare(cfg):
               f"기존 전일 종가 방식 제외 {counts['previous_close_method_excluded_rows']}행 "
               f"(기업행사 규칙 {counts['corp_action_days']}일) / 기준가 방식 제외 "
               f"{counts['base_price_excluded_rows']}행 (검증식 불일치·계산 불가 "
-              f"{counts['base_price_formula_invalid_rows']}행, 기존 규칙 중 기준가로 복원 "
+              f"{counts['base_price_formula_invalid_rows']}행, 거래정지 직후 "
+              f"{counts['base_price_after_halt_rows']}행, 기존 규칙 중 기준가로 복원 "
               f"{counts['base_price_recovered_corp_action_rows']}행), "
               f"코스닥 데이터가 일찍 끝나는 종목 {counts['early_end']} (moved = 유가증권 이전 상장 추정)")
     else:
