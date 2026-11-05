@@ -12,10 +12,12 @@ params는 모델 기본값(DEFAULTS)에 덮어쓴다. 공통 선택지 smearing(
 """
 import numpy as np
 
-from . import ewma, har, lgbm, lstm
+from . import ewma, garch, gnn, har, lgbm, lstm
 
-DISPLAY = {"ewma": "EWMA", "har": "HAR", "lgbm": "LightGBM", "lstm": "LSTM"}
-DEFAULTS = {"ewma": {"lam": 0.94, "warmup": 22}, "har": {}, "lgbm": dict(lgbm.PARAMS), "lstm": dict(lstm.PARAMS)}
+DISPLAY = {"ewma": "EWMA", "har": "HAR", "lgbm": "LightGBM", "lstm": "LSTM",  # 1단계
+           "gru": "GRU", "garch": "GARCH", "gnn": "GNN"}  # 2단계
+DEFAULTS = {"ewma": {"lam": 0.94, "warmup": 22}, "har": {}, "lgbm": dict(lgbm.PARAMS), "lstm": dict(lstm.PARAMS),
+            "gru": {**lstm.PARAMS, "arch": "gru"}, "garch": dict(garch.PARAMS), "gnn": dict(gnn.PARAMS)}
 
 
 def smearing_constant(panel, pred):
@@ -41,8 +43,13 @@ def fit_predict(model, panel, params=None, seed=0):
     elif model == "lgbm":
         fitted, n_fit = lgbm.fit(panel, seed, p)
         pred, info = lgbm.predict(panel, fitted), {**p, "n_fit": n_fit}
-    else:
+    elif model in ("lstm", "gru"):
         pred, info = lstm.fit_predict(panel, seed, p)
+    elif model == "garch":
+        pred, info = garch.fit_predict(panel, int(panel["horizon"].iloc[0]), p)
+    else:
+        pred, info = gnn.fit_predict(panel, seed, p)
+    pred = pred.reindex(panel.index)  # 모델 안에서 정렬을 바꿔도 panel 순서로 맞춘다
     info["smearing"] = smearing
     if smearing:
         info["smearing_c"] = smearing_constant(panel, pred)

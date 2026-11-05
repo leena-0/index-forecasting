@@ -17,3 +17,18 @@ lstm:
   lookback: [22, 44]
   hidden: [16, 64]
   epochs: [5, 10]
+
+# ── 2단계 ──
+gru:
+  lookback: [22, 44]
+  hidden: [16, 64]
+  epochs: [5, 10]
+
+garch:
+  mean: [zero, demean]
+  min_obs: [250, 500]
+
+gnn:
+  k: [5, 10]
+  hidden: [16, 32]
+  epochs: [5, 10]
