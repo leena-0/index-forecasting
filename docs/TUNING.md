@@ -32,3 +32,11 @@
 `src.evaluate`가 `horizon_choice.csv`를 만든다: 검증 구간 편입 이벤트 윈도우에서
 imp_h = 평균_m (1 − L_m / L_EWMA), m ∈ {HAR, LightGBM, LSTM}. imp_h가 큰 h를 주 결과로 쓴다.
 튜닝된 예측(`data/preds/tuned/`)으로 실행한다.
+
+## 4. 실행 기록 (2026-11-03, 개발용 — 결과 아님)
+
+- 조건: 구성종목·이벤트 legacy, 공지 없는 이벤트 16건 제외, 이전 5.4 규칙(`corp_action` 결측), `reportable: false`
+- 범위: 9개 모델 × h 2개, 약 4시간. 결과 요약은 `data/tuning/SUMMARY.md`
+- 선택: 18개 모두 편향 보정 있음. 여러 선택이 탐색 범위 끝에 걸렸다(lookback 44, epochs 10, λ 0.99) → 다시 튜닝하기 전에 `configs/tuning.yaml`의 범위 확장을 검토한다.
+- 7.4: h = 22 선택 (개선율 31.0%, h = 5는 25.7%, `data/eval/tuned_val`)
+- 기준가 규칙(CLAUDE.md 5.4)을 코드에 반영하면 타깃이 바뀌므로 prepare·튜닝·7.4를 다시 실행하고, 이 결과와 섞어 비교하지 않는다.
