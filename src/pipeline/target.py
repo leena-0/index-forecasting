@@ -4,7 +4,9 @@ Yang, D., & Zhang, Q. (2000). Drift-independent volatility estimation based on h
 and close prices. Journal of Business, 73(3), 477–491.
 
 h일 구간(i = 1, …, n, n = h)에 대해
-    o_i = ln(O_i / C_{i-1})   야간 수익률 (C_0 = 구간 시작 전날 종가)
+    o_i = ln(O_i / R_i)       야간 수익률
+                               Open API: R_i = 당일 KRX 기준가
+                               legacy: R_i = C_{i-1} (구간 시작 전날 종가 포함)
     c_i = ln(C_i / O_i)       장중 수익률
     u_i = ln(H_i / O_i),  d_i = ln(L_i / O_i)
 
@@ -13,11 +15,11 @@ h일 구간(i = 1, …, n, n = h)에 대해
     σRS² = 1/n · Σ [u_i(u_i − c_i) + d_i(d_i − c_i)]
     σYZ² = σo² + k·σc² + (1 − k)·σRS²,   k = 0.34 / (1.34 + (n+1)/(n−1))
 
-타깃(origin t) = 구간 t+1 ~ t+h의 σYZ² (일 단위 분산). o_1에는 t의 종가가 들어간다.
+타깃(origin t) = 구간 t+1 ~ t+h의 σYZ² (일 단위 분산).
+legacy의 o_1에는 t의 종가가, Open API의 o_1에는 t+1의 KRX 기준가가 들어간다.
 구간 안에 결측(거래정지, 상장 전, 데이터 끝)이 하나라도 있으면 NaN — 보간하지 않는다.
-거래정지 다음 날은 직전 종가가 없으므로 o가 NaN이 되어, 그날이 들어간 구간도 NaN이다.
-prices에 corp_action 열이 있으면(수정 안 된 가격, openapi 어댑터) 그날의 o도 NaN으로 두어
-분할·증자로 가격 기준이 바뀐 날이 들어간 구간을 결측으로 처리한다.
+Open API는 base_price_valid가 False인 첫 관측일·신규상장일·거래정지일·검증 실패일의 o를 NaN으로 둔다.
+legacy는 거래정지 다음 날도 직전 종가가 없으므로 o가 NaN이고, corp_action 열이 있으면 그날의 o를 NaN으로 둔다.
 """
 import numpy as np
 import pandas as pd
@@ -33,7 +35,8 @@ def yz_k(n):
 def forward_yz(prices, calendar, h, demean=True):
     """종목·거래일마다 다음 h일의 Yang–Zhang 분산.
 
-    prices: DataFrame[date, ticker, open, high, low, close] (거래정지일은 NaN)
+    prices: DataFrame[date, ticker, open, high, low, close] (거래정지일은 NaN).
+            Open API 입력은 base_price, base_price_valid를 추가로 가진다.
     calendar: 거래일 DatetimeIndex. 종목마다 첫 행 ~ 마지막 행 사이를 달력에 맞춰 펼친 뒤 계산한다
               (달력에 있는데 행이 없는 날은 결측).
     돌려주는 것: DataFrame[ticker, origin_date, horizon, yz_var]
@@ -44,8 +47,14 @@ def forward_yz(prices, calendar, h, demean=True):
         g = g.set_index("date").sort_index()
         days = calendar[(calendar >= g.index[0]) & (calendar <= g.index[-1])]
         g = g.reindex(days)
-        o = np.log(g["open"] / g["close"].shift(1))
-        if "corp_action" in g:  # 수정 안 된 가격: 가격 기준이 바뀐 날의 야간 수익률은 쓰지 않는다
+        if "base_price" in g:
+            reference = g["base_price"]
+            if "base_price_valid" in g:
+                reference = reference.where(g["base_price_valid"].fillna(False).astype(bool))
+            o = np.log(g["open"] / reference)
+        else:
+            o = np.log(g["open"] / g["close"].shift(1))
+        if "base_price" not in g and "corp_action" in g:  # legacy/비기준가 입력의 기존 보수적 처리
             o = o.mask(g["corp_action"].fillna(False).astype(bool))
         c = np.log(g["close"] / g["open"])
         u = np.log(g["high"] / g["open"])
