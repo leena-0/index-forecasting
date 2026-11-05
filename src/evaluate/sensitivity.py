@@ -68,3 +68,13 @@ def no_baseline_post(ec, baseline="baseline", post="post"):
     g["L_E"], g["L_C"] = g["sum_E"] / g["n"], g["sum_C"] / g["n"]
     g["log_ratio"] = np.log(g["L_E"] / g["L_C"])
     return g[["split", "model", "n_events", "L_E", "L_C", "log_ratio"]]
+
+
+def event_window_rows(panel, phases):
+    """panel 행이 편입 이벤트 윈도우 안인지 (bool Series, panel과 같은 index). 7.4 예측 기간 선택용.
+    윈도우 = 편입 이벤트(crosses_split=False)의 완전한(complete) 구간들 [start, end], 같은 분할 안."""
+    ev = phases[(phases["direction"] == "편입") & ~phases["crosses_split"] & phases["complete"]]
+    x = panel[["ticker", "origin_date", "split"]].reset_index().merge(
+        ev[["ticker", "split", "start", "end"]], on=["ticker", "split"])
+    idx = x.loc[(x["origin_date"] >= x["start"]) & (x["origin_date"] <= x["end"]), "index"].unique()
+    return pd.Series(panel.index.isin(idx), index=panel.index)
