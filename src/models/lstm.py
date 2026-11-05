@@ -1,7 +1,11 @@
-"""시퀀스 모델 (LSTM, GRU) — 최근 L거래일의 일별 특성 시퀀스 → 다음 h일 로그 분산 (CLAUDE.md 6.1).
+"""시퀀스 모델 (LSTM, GRU, TCN, Transformer) — 최근 L거래일의 일별 특성 시퀀스 → 다음 h일 로그 분산 (CLAUDE.md 6.1).
 
     입력 X_t = [z_{t−L+1}, …, z_t],  z_s = [ln rv_d, ret, log_turnover]_s  (학습 구간 평균·표준편차로 표준화)
-    출력     = Linear(순환 셀의 마지막 은닉 상태) = 예측 log_var_t,  셀 = arch (lstm: 1단계, gru: 2단계)
+    출력     = Linear(마지막 시점의 은닉 표현) = 예측 log_var_t
+    arch     lstm (1단계) · gru (2단계): 순환 셀, hidden = 은닉 크기, layers = 층 수
+             tcn (3단계): 인과 팽창 합성곱 (Bai et al., 2018) — 층 i의 팽창 2^i, kernel 크기, 잔차 연결, hidden = 채널
+             transformer (3단계): 선형 투영 + 학습 위치 임베딩 + 인코더 (Vaswani et al., 2017), hidden = d_model,
+                          heads = 헤드 수, 마스크 없음(창 전체가 t일 이전 정보)
     손실     = MSE (로그 분산, CLAUDE.md 5.2)
 
 - 시퀀스는 종목별로 달력상 연속한 L일이다 (특성 패널은 종목마다 첫 행 ~ 마지막 행을 달력에 맞춰 펼친 표).
@@ -14,7 +18,8 @@ import numpy as np
 import pandas as pd
 
 SEQ_FEATURES = ["rv_d", "ret", "log_turnover"]
-PARAMS = {"arch": "lstm", "lookback": 22, "hidden": 32, "layers": 1, "epochs": 5, "batch_size": 1024, "lr": 1e-3}
+PARAMS = {"arch": "lstm", "lookback": 22, "hidden": 32, "layers": 1, "epochs": 5, "batch_size": 1024, "lr": 1e-3,
+          "kernel": 3, "heads": 2}
 
 
 def daily_features(panel):
@@ -50,6 +55,10 @@ def _net(n_in, p):
     import torch
 
     rnn = {"lstm": torch.nn.LSTM, "gru": torch.nn.GRU}
+    if p["arch"] == "tcn":
+        return _tcn(n_in, p)
+    if p["arch"] == "transformer":
+        return _transformer(n_in, p)
     if p["arch"] not in rnn:
         raise ValueError(f"지원하지 않는 arch: {p['arch']}")
 
@@ -62,6 +71,53 @@ def _net(n_in, p):
         def forward(self, x):
             out, _ = self.rnn(x)
             return self.head(out[:, -1]).squeeze(-1)
+
+    return Net()
+
+
+def _tcn(n_in, p):
+    import torch
+
+    class Block(torch.nn.Module):
+        def __init__(self, c_in, c_out, dilation):
+            super().__init__()
+            self.pad = (p["kernel"] - 1) * dilation  # 왼쪽만 채워 인과(t 이후를 보지 않음)
+            self.conv = torch.nn.Conv1d(c_in, c_out, p["kernel"], dilation=dilation)
+            self.skip = torch.nn.Conv1d(c_in, c_out, 1) if c_in != c_out else torch.nn.Identity()
+
+        def forward(self, x):  # x: 배치 × 채널 × L
+            y = self.conv(torch.nn.functional.pad(x, (self.pad, 0)))
+            return torch.relu(y + self.skip(x))
+
+    class Net(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            chans = [n_in] + [p["hidden"]] * p["layers"]
+            self.blocks = torch.nn.Sequential(*[Block(chans[i], chans[i + 1], 2 ** i) for i in range(p["layers"])])
+            self.head = torch.nn.Linear(p["hidden"], 1)
+
+        def forward(self, x):  # x: 배치 × L × 특성
+            return self.head(self.blocks(x.transpose(1, 2))[:, :, -1]).squeeze(-1)
+
+    return Net()
+
+
+def _transformer(n_in, p):
+    import torch
+
+    class Net(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            d = p["hidden"]
+            self.proj = torch.nn.Linear(n_in, d)
+            self.pos = torch.nn.Parameter(torch.zeros(1, p["lookback"], d))
+            layer = torch.nn.TransformerEncoderLayer(d, p["heads"], dim_feedforward=2 * d, dropout=0.0,
+                                                     batch_first=True)
+            self.enc = torch.nn.TransformerEncoder(layer, p["layers"], enable_nested_tensor=False)
+            self.head = torch.nn.Linear(d, 1)
+
+        def forward(self, x):
+            return self.head(self.enc(self.proj(x) + self.pos)[:, -1]).squeeze(-1)
 
     return Net()
 

@@ -15,9 +15,11 @@ import numpy as np
 from . import ewma, garch, gnn, har, lgbm, lstm
 
 DISPLAY = {"ewma": "EWMA", "har": "HAR", "lgbm": "LightGBM", "lstm": "LSTM",  # 1단계
-           "gru": "GRU", "garch": "GARCH", "gnn": "GNN"}  # 2단계
+           "gru": "GRU", "garch": "GARCH", "gnn": "GNN",  # 2단계
+           "tcn": "TCN", "transformer": "Transformer"}  # 3단계
 DEFAULTS = {"ewma": {"lam": 0.94, "warmup": 22}, "har": {}, "lgbm": dict(lgbm.PARAMS), "lstm": dict(lstm.PARAMS),
-            "gru": {**lstm.PARAMS, "arch": "gru"}, "garch": dict(garch.PARAMS), "gnn": dict(gnn.PARAMS)}
+            "gru": {**lstm.PARAMS, "arch": "gru"}, "garch": dict(garch.PARAMS), "gnn": dict(gnn.PARAMS),
+            "tcn": {**lstm.PARAMS, "arch": "tcn", "layers": 3}, "transformer": {**lstm.PARAMS, "arch": "transformer", "layers": 2}}
 
 
 def smearing_constant(panel, pred):
@@ -43,7 +45,7 @@ def fit_predict(model, panel, params=None, seed=0):
     elif model == "lgbm":
         fitted, n_fit = lgbm.fit(panel, seed, p)
         pred, info = lgbm.predict(panel, fitted), {**p, "n_fit": n_fit}
-    elif model in ("lstm", "gru"):
+    elif model in ("lstm", "gru", "tcn", "transformer"):
         pred, info = lstm.fit_predict(panel, seed, p)
     elif model == "garch":
         pred, info = garch.fit_predict(panel, int(panel["horizon"].iloc[0]), p)
