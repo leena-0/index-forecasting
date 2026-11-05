@@ -1,19 +1,22 @@
 """공통 특성 패널 (CLAUDE.md 6.2 모델 입력). t일 특성은 t일 장 마감까지 알 수 있는 값만 쓴다 (3장).
 
 종목·거래일(t)마다
-    o_t = ln(O_t / C_{t−1}),  c_t = ln(C_t / O_t),  u_t = ln(H_t / O_t),  d_t = ln(L_t / O_t)
+    o_t = ln(O_t / R_t),      c_t = ln(C_t / O_t),  u_t = ln(H_t / O_t),  d_t = ln(L_t / O_t)
+    R_t = Open API는 당일 KRX 기준가, legacy는 C_{t−1}
     rv_d  = o_t² + u_t(u_t − c_t) + d_t(d_t − c_t)     일별 분산 대용치: 야간 수익률 제곱 + Rogers–Satchell
     rv_w  = (1/5)  Σ_{j=0}^{4}  rv_d_{t−j}             HAR 구성요소 (Corsi, 2009)
     rv_m  = (1/22) Σ_{j=0}^{21} rv_d_{t−j}
     yz_5, yz_22 = 구간 t−h+1 ~ t의 Yang–Zhang 분산 (타깃과 같은 정의 — origin t−h의 타깃, target.forward_yz)
-    ret   = ln(C_t / C_{t−1})                            종가 수익률
-    log_turnover = ln(volume_t / shares_t)
-    log_mcap     = ln(mcap_t)
+    ret   = ln(C_t / R_t)                                기준가 대비 종가 수익률
+    log_turnover = ln(volume_t / shares_t) − share_lag_t
+    log_mcap     = ln(mcap_t) + share_lag_t
+                   share_lag_t = 권리락·분할 뒤 아직 반영되지 않은 상장주식수 변화 (openapi.add_share_lag, legacy는 0)
     is_member    = t일 구성종목 여부
     n_obs        = 종목의 첫 행부터 t까지 달력상 거래일 수 (이력 길이, CLAUDE.md 6.3)
 
 결측은 보간하지 않는다: 창 안에 결측(거래정지, 상장 전)이 하나라도 있으면 NaN.
-corp_action 열이 있으면(수정 안 된 가격) 그날의 o_t와 ret은 실제 수익률이 아니므로 NaN으로 둔다.
+Open API는 base_price_valid가 False인 날의 o_t와 ret을 NaN으로 둔다.
+legacy에서 corp_action 열이 있으면 기존 규칙대로 그날의 o_t와 ret을 NaN으로 둔다.
 """
 from pathlib import Path
 
@@ -26,29 +29,36 @@ FEATURES = ["rv_d", "rv_w", "rv_m", "yz_5", "yz_22", "ret", "log_turnover", "log
 
 
 def build_features(prices, calendar, members, demean=True):
-    """prices: DataFrame[date, ticker, open, high, low, close, volume, mcap, shares(, corp_action)]
+    """prices: DataFrame[date, ticker, open, high, low, close, volume, mcap, shares]
+    Open API 입력은 base_price, base_price_valid, share_lag를, legacy 호환 입력은 corp_action을 추가로 가질 수 있다.
     members: DataFrame[date, ticker]. 돌려주는 것: DataFrame[ticker, date] + FEATURES."""
     out = []
     for ticker, g in prices.groupby("ticker", sort=True):
         g = g.set_index("date").sort_index()
         days = calendar[(calendar >= g.index[0]) & (calendar <= g.index[-1])]
         g = g.reindex(days)
-        prev_close = g["close"].shift(1)
-        o = np.log(g["open"] / prev_close)
-        ret = np.log(g["close"] / prev_close)
-        if "corp_action" in g:
+        if "base_price" in g:
+            reference = g["base_price"]
+            if "base_price_valid" in g:
+                reference = reference.where(g["base_price_valid"].fillna(False).astype(bool))
+        else:
+            reference = g["close"].shift(1)
+        o = np.log(g["open"] / reference)
+        ret = np.log(g["close"] / reference)
+        if "base_price" not in g and "corp_action" in g:
             ca = g["corp_action"].fillna(False).astype(bool)
             o, ret = o.mask(ca), ret.mask(ca)
         c = np.log(g["close"] / g["open"])
         u = np.log(g["high"] / g["open"])
         d = np.log(g["low"] / g["open"])
         rv_d = o ** 2 + u * (u - c) + d * (d - c)
+        lag = g["share_lag"].fillna(0.0) if "share_lag" in g else 0.0
         out.append(pd.DataFrame({
             "ticker": ticker, "date": days, "rv_d": rv_d.values,
             "rv_w": rv_d.rolling(5, min_periods=5).mean().values,
             "rv_m": rv_d.rolling(22, min_periods=22).mean().values,
-            "ret": ret.values, "log_turnover": np.log(g["volume"] / g["shares"]).values,
-            "log_mcap": np.log(g["mcap"]).values, "n_obs": np.arange(1, len(days) + 1)}))
+            "ret": ret.values, "log_turnover": (np.log(g["volume"] / g["shares"]) - lag).values,
+            "log_mcap": (np.log(g["mcap"]) + lag).values, "n_obs": np.arange(1, len(days) + 1)}))
     f = pd.concat(out, ignore_index=True)
     for h in (5, 22):  # 구간 t−h+1 ~ t = origin t−h의 타깃
         yz = forward_yz(prices, calendar, h, demean)

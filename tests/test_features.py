@@ -94,6 +94,37 @@ class FeatureTest(unittest.TestCase):
         self.assertTrue(math.isnan(b.loc[self.cal[35], "ret"]))
         self.assertFalse(math.isnan(b.loc[self.cal[35], "log_turnover"]))
 
+    def test_base_price_drives_overnight_and_close_return(self):
+        p = self.prices.copy()
+        day = self.cal[35]
+        row = (p["ticker"] == "A") & (p["date"] == day)
+        p["base_price"] = p.groupby("ticker")["close"].shift(1)
+        p["base_price_valid"] = p["base_price"].notna()
+        p.loc[row, ["open", "high", "low", "close", "base_price"]] = [50, 53, 49, 52, 50]
+        p["corp_action"] = row  # 기준가가 있으면 기존 휴리스틱은 계산을 막지 않는다
+        f = build_features(p, self.cal, self.members)
+        got = f[(f["ticker"] == "A") & (f["date"] == day)].iloc[0]
+        c, u, d = math.log(52 / 50), math.log(53 / 50), math.log(49 / 50)
+        self.assertAlmostEqual(got["ret"], math.log(52 / 50))
+        self.assertAlmostEqual(got["rv_d"], u * (u - c) + d * (d - c))
+
+
+class ShareLagFeatureTest(unittest.TestCase):
+    def test_share_lag_adjusts_mcap_and_turnover(self):
+        cal, p = make_prices()
+        members = pd.DataFrame({"date": cal[30:], "ticker": "A"})
+        plain = build_features(p, cal, members).set_index(["ticker", "date"])
+        lagged = p.assign(share_lag=0.0)
+        row = (lagged["ticker"] == "A") & (lagged["date"] == cal[35])
+        lagged.loc[row, "share_lag"] = math.log(2)
+        adj = build_features(lagged, cal, members).set_index(["ticker", "date"])
+        key = ("A", cal[35])
+        self.assertAlmostEqual(adj.loc[key, "log_mcap"], plain.loc[key, "log_mcap"] + math.log(2))
+        self.assertAlmostEqual(adj.loc[key, "log_turnover"], plain.loc[key, "log_turnover"] - math.log(2))
+        self.assertAlmostEqual(adj.loc[key, "rv_d"], plain.loc[key, "rv_d"])
+        other = ("A", cal[36])
+        self.assertAlmostEqual(adj.loc[other, "log_mcap"], plain.loc[other, "log_mcap"])
+
 
 class LoadPanelTest(unittest.TestCase):
     def setUp(self):
