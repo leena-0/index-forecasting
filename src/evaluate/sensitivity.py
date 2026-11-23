@@ -10,7 +10,7 @@
   기준 구간과 구간 s가 모두 완전한(complete) 것만 Sens_{m,s}에 들어간다.
 - 대조군(기존 구성종목): 그날의 구성종목 중, 그날 어떤 편입·편출 이벤트 윈도우(첫 구간 시작 ~ 마지막 구간 끝)
   안에도 있지 않은 종목.
-- 기준 구간이 없는(불완전한) 편입 이벤트(특례편입 등)는 Sens에서 빠지고, 사후 구간의
+- 기준 구간이 불완전하거나 같은 종목의 이전 이벤트와 겹친 편입 이벤트는 Sens에서 빠지고, 사후 구간의
   ln(L^E_사후 / L^C_사후)를 따로 계산한다 (no_baseline_post).
 """
 import numpy as np
@@ -35,20 +35,36 @@ def event_control_losses(panel, members, phases, loss="qlike"):
     panel = panel.reset_index(drop=True)
     ctrl = (panel[control_flag(panel, members, phases)]
             .groupby(["model", "origin_date"], as_index=False)[loss].mean().rename(columns={loss: "L_C"}))
-    ev = phases[(phases["direction"] == "편입") & ~phases["crosses_split"]]
-    x = ev[["event_id", "ticker", "phase", "split", "start", "end", "complete"]].merge(
+    ev = phases[(phases["direction"] == "편입") & ~phases["crosses_split"]].copy()
+    for flag in ("baseline_overlaps_prev", "baseline_overlaps_any_prev"):
+        if flag not in ev:
+            ev[flag] = False
+    x = ev[["event_id", "ticker", "phase", "split", "start", "end", "complete",
+            "baseline_overlaps_prev", "baseline_overlaps_any_prev"]].merge(
         panel[["ticker", "origin_date", "split", "model", loss]], on=["ticker", "split"])
     x = x[(x["origin_date"] >= x["start"]) & (x["origin_date"] <= x["end"])]
     x = x.merge(ctrl, on=["model", "origin_date"])
-    return (x.groupby(["event_id", "phase", "split", "model", "complete"], as_index=False)
+    return (x.groupby(["event_id", "phase", "split", "model", "complete",
+                       "baseline_overlaps_prev", "baseline_overlaps_any_prev"], as_index=False)
              .agg(n=(loss, "size"), sum_E=(loss, "sum"), sum_C=("L_C", "sum")))
 
 
-def sensitivity(ec, baseline="baseline"):
+def _baseline_rows(ec, baseline, overlap_scope):
+    flags = {"same_ticker": "baseline_overlaps_prev", "any_prior": "baseline_overlaps_any_prev",
+             "none": None}
+    if overlap_scope not in flags:
+        raise ValueError(f"알 수 없는 기준 구간 겹침 규칙: {overlap_scope}")
+    rows = ec[(ec["phase"] == baseline) & ec["complete"]]
+    flag = flags[overlap_scope]
+    return rows[~rows[flag]] if flag else rows
+
+
+def sensitivity(ec, baseline="baseline", overlap_scope="same_ticker"):
     """event_control_losses 결과 → Sens_{m,s}. 열: split, model, phase, n_events, L_E, L_C, L_E_base, L_C_base, sens.
-    구간 s마다 기준 구간과 s가 모두 완전한 이벤트만 모은다."""
+    구간 s마다 기준 구간과 s가 모두 완전한 이벤트만 모은다.
+    기본 분석은 같은 종목의 이전 충격·사후 구간과 겹친 기준 구간을 제외한다."""
     c = ec[ec["complete"]]
-    base = c[c["phase"] == baseline][["event_id", "model", "n", "sum_E", "sum_C"]]
+    base = _baseline_rows(c, baseline, overlap_scope)[["event_id", "model", "n", "sum_E", "sum_C"]]
     x = c[c["phase"] != baseline].merge(base, on=["event_id", "model"], suffixes=("", "_base"))
     g = x.groupby(["split", "model", "phase"], as_index=False).agg(
         n_events=("event_id", "nunique"), n=("n", "sum"), sum_E=("sum_E", "sum"), sum_C=("sum_C", "sum"),
@@ -59,9 +75,9 @@ def sensitivity(ec, baseline="baseline"):
     return g[["split", "model", "phase", "n_events", "L_E", "L_C", "L_E_base", "L_C_base", "sens"]]
 
 
-def no_baseline_post(ec, baseline="baseline", post="post"):
-    """기준 구간이 불완전한 편입 이벤트의 사후 구간 ln(L^E / L^C). 열: split, model, n_events, L_E, L_C, log_ratio."""
-    has_base = set(ec.loc[(ec["phase"] == baseline) & ec["complete"], "event_id"])
+def no_baseline_post(ec, baseline="baseline", post="post", overlap_scope="same_ticker"):
+    """기준 구간이 불완전하거나 이전 영향과 겹친 편입 이벤트의 사후 비교."""
+    has_base = set(_baseline_rows(ec, baseline, overlap_scope)["event_id"])
     x = ec[(ec["phase"] == post) & ec["complete"] & ~ec["event_id"].isin(has_base)]
     g = x.groupby(["split", "model"], as_index=False).agg(
         n_events=("event_id", "nunique"), n=("n", "sum"), sum_E=("sum_E", "sum"), sum_C=("sum_C", "sum"))

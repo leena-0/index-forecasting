@@ -38,7 +38,8 @@ def assign_splits(targets, calendar, split_cfg):
 
 def event_phases(events, calendar, prices, phases_cfg, split_cfg):
     """이벤트 × 구간 표. 열: event_id, ticker, event_type, direction, phase, start, end,
-    complete, reason, split, crosses_split, baseline_overlaps_prev."""
+    complete, reason, split, crosses_split, baseline_overlaps_prev,
+    baseline_overlaps_any_prev."""
     span = prices.groupby("ticker")["date"].agg(["min", "max"])
     last = len(calendar) - 1
     rows = []
@@ -78,16 +79,23 @@ def event_phases(events, calendar, prices, phases_cfg, split_cfg):
     w["crosses_split"] = split_of(w["w_start"], split_cfg) != split_of(w["w_end"], split_cfg)
     out = out.merge(w[["crosses_split"]], left_on="event_id", right_index=True)
 
-    # 같은 종목의 직전 이벤트 사후 구간과 기준 구간이 겹치는지 (CLAUDE.md 4.3: 표시해 둔다)
-    b = out[out["phase"] == "baseline"][["event_id", "ticker", "start"]]
-    p = out[out["phase"] == "post"][["event_id", "ticker", "end"]]
-    flags = {}
-    for tk, g in b.groupby("ticker"):
-        posts = p[p["ticker"] == tk]
-        for r in g.itertuples():
-            prev = posts[posts["event_id"] < r.event_id]
-            flags[r.event_id] = bool((prev["end"] >= r.start).any())
-    out["baseline_overlaps_prev"] = out["event_id"].map(flags).fillna(False).astype(bool)
+    # 기준 구간과 이전 이벤트의 실제 영향 구간이 교차하는지 확인한다.
+    # event_id 순서에 의존하지 않고 적용일로 이전 이벤트를 판정한다.
+    effective = events.set_index("event_id")["effective_date"]
+    baselines = out[out["phase"] == "baseline"]
+    effects = out[out["phase"].isin(["short_shock", "post"])].copy()
+    effects["effective_date"] = effects["event_id"].map(effective)
+    same_flags, any_flags = {}, {}
+    for baseline in baselines.itertuples():
+        prior = effects[
+            (effects["effective_date"] < effective.loc[baseline.event_id])
+            & (effects["start"] <= baseline.end)
+            & (effects["end"] >= baseline.start)
+        ]
+        same_flags[baseline.event_id] = bool((prior["ticker"] == baseline.ticker).any())
+        any_flags[baseline.event_id] = not prior.empty
+    out["baseline_overlaps_prev"] = out["event_id"].map(same_flags).fillna(False).astype(bool)
+    out["baseline_overlaps_any_prev"] = out["event_id"].map(any_flags).fillna(False).astype(bool)
     return out
 
 

@@ -23,7 +23,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 |---|---|
 | `targets_h{h}.parquet` | `ticker, origin_date, horizon, yz_var, split, embargo` — 종목·거래일마다 다음 h일의 Yang–Zhang 분산 |
 | `features.parquet` | `ticker, date` + 모델 입력 특성 (아래 표). 모델은 `load_panel`로 읽는다 |
-| `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev` |
+| `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev, baseline_overlaps_any_prev` |
 | `members.parquet` | `date, ticker` — 그날의 구성종목. 공통 평가의 대조군에 쓴다 (`docs/EVALUATION.md`) |
 | `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약, **`reportable: false`와 `hold_reasons`** (구성종목·이벤트가 legacy, 공지 없는 이벤트를 뺌, 임시 공지일 등 최종 결과에 반영하지 않는 이유) |
 
@@ -112,7 +112,7 @@ k = 0.34 / (1.34 + (n+1)/(n−1)) (n = 5 → 0.120, n = 22 → 0.140). 식은 `s
 - **경계 공백**: origin의 분할과 타깃 구간 끝(origin + h영업일)의 분할이 다르면 `embargo = True`.
 - **이벤트 분할**: 공지일 기준. 전체 윈도우(기준 구간 시작 ~ 사후 구간 끝)가 경계를 넘으면 `crosses_split = True`.
 - **불완전 구간**: 달력 시작 전 / as_of 이후 / 종목 데이터 기간 밖이면 `complete = False`, 이유는 `reason`.
-- **기준 구간 겹침**: 같은 종목의 직전 이벤트 사후 구간과 겹치면 `baseline_overlaps_prev = True` (표시만).
+- **기준 구간 겹침**: 기준 구간과 이전 이벤트의 단기 충격·사후 구간이 날짜상 실제로 교차하면 표시한다. 같은 종목이면 `baseline_overlaps_prev`, 다른 종목도 포함하면 `baseline_overlaps_any_prev`다. 두 판정은 적용일 순서로 하며, 민감도 분석에서는 같은 종목 겹침을 기본 제외한다 (`docs/EVALUATION.md`).
 - **구성종목 검증**: 편입 이벤트는 편입일에 구성종목이고 직전 거래일엔 아닌지(편출은 반대) 확인해 불일치 건수를 출력한다.
 
 ## 6. 실행 건수 (개발용 — 결과 아님)

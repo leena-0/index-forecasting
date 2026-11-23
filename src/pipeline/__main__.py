@@ -5,7 +5,7 @@
 결과(out_dir, git 제외):
   targets_h{h}.parquet   ticker, origin_date, horizon, yz_var, split, embargo
   features.parquet       ticker, date, 모델 입력 특성 (features.py, 불러오기는 features.load_panel)
-  event_phases.parquet   이벤트 × 구간 (complete, reason, split, crosses_split, baseline_overlaps_prev)
+  event_phases.parquet   이벤트 × 구간 (complete, reason, split, crosses_split, baseline_overlaps_prev, baseline_overlaps_any_prev)
   members.parquet        date, ticker — 그날의 구성종목 (평가의 대조군, src.evaluate)
   meta.json              data_source, as_of, config, git commit, 패키지 버전, 건수 요약
 """
@@ -147,6 +147,7 @@ def prepare(cfg):
     counts["events_by_split"] = ev_split.groupby("split").size().to_dict()
     counts["events_crossing_split"] = ev_split[ev_split["crosses_split"]].groupby("split").size().to_dict()
     counts["baseline_overlaps_prev"] = int(ev_split["baseline_overlaps_prev"].sum())
+    counts["baseline_overlaps_any_prev"] = int(ev_split["baseline_overlaps_any_prev"].sum())
     if "moved_tickers" in counts:  # 이전 상장 종목: 코스닥 데이터가 끝난 뒤 구간은 "종목 데이터 기간 밖"으로 제외됨
         mv = ph[ph["ticker"].isin(counts["moved_tickers"])]
         out_mv = mv[mv["reason"] == "종목 데이터 기간 밖"]
@@ -154,7 +155,8 @@ def prepare(cfg):
         print(f"이전 상장 추정 {len(counts['moved_tickers'])}종목의 이벤트 {mv['event_id'].nunique()}건 중 "
               f"코스닥 데이터 밖이라 제외된 구간 {len(out_mv)}개: {counts['moved_excluded_phases']}")
     print(f"\n분할별 이벤트 {counts['events_by_split']}, 그중 윈도우가 경계를 넘어 제외 "
-          f"{counts['events_crossing_split']}, 기준 구간이 직전 사후 구간과 겹침 {counts['baseline_overlaps_prev']}")
+          f"{counts['events_crossing_split']}, 기준 구간과 이전 충격·사후 구간 겹침 "
+          f"(같은 종목 {counts['baseline_overlaps_prev']}, 다른 종목 포함 {counts['baseline_overlaps_any_prev']})")
 
     # 구성종목·이벤트가 아직 legacy(pykrx 자동 수집)이므로 어떤 data_source든 최종 결과에 반영하지 않는다
     hold = ["구성종목·이벤트가 legacy(개발용) 데이터"]

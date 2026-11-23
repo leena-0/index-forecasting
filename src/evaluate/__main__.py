@@ -10,7 +10,10 @@ data-dir는 src.pipeline prepare의 결과 폴더 (targets_h{h}.parquet, event_p
   dm_h{h}.csv            모델 쌍별 Diebold–Mariano (QLIKE, HAC 시차 h−1)
   mcs_h{h}.csv           Model Confidence Set (QLIKE, T_max)
   sensitivity.csv        편입 민감도 Sens_{m,s} (QLIKE)
-  no_baseline_post.csv   기준 구간 없는 편입 이벤트의 사후 구간 ln(L^E / L^C)
+  sensitivity_all_baselines.csv  겹친 기준 구간도 포함한 비교 결과
+  sensitivity_no_prior_event_overlap.csv  다른 종목의 이전 이벤트와 겹친 기준 구간도 제외한 비교 결과
+  baseline_overlap_audit.csv  편입 이벤트별 기준 구간 겹침 여부
+  no_baseline_post.csv   유효 기준 구간 없는 편입 이벤트의 사후 구간 ln(L^E / L^C)
   event_window.csv       편입 이벤트 윈도우 안의 평균 손실 (split, horizon, model)
   horizon_choice.csv     7.4 주 예측 기간 선택 (EWMA 대비 1단계 모델 평균 QLIKE 개선율)
   meta.json              입력·설정·건수, prepare meta의 reportable·hold_reasons를 그대로 옮김
@@ -37,6 +40,9 @@ REPO = Path(__file__).resolve().parents[2]
 def evaluate(pred, data_dir, split, out_dir, alpha=0.10, B=1000, seed=0):
     prep_meta = json.loads((data_dir / "meta.json").read_text(encoding="utf-8"))
     phases = pd.read_parquet(data_dir / "event_phases.parquet")
+    overlap_cols = {"baseline_overlaps_prev", "baseline_overlaps_any_prev"}
+    if not overlap_cols <= set(phases):
+        sys.exit("기준 구간 겹침 판정이 없는 prepare 결과입니다. 새 코드로 prepare를 다시 실행하세요.")
     members = pd.read_parquet(data_dir / "members.parquet")
     out_dir.mkdir(parents=True, exist_ok=True)
     counts, panels = {}, []
@@ -59,13 +65,30 @@ def evaluate(pred, data_dir, split, out_dir, alpha=0.10, B=1000, seed=0):
     s.to_csv(out_dir / "summary.csv", index=False)
     print(s.to_string(index=False))
 
-    sens, nbp = [], []
+    audit = phases[(phases["direction"] == "편입") & (phases["phase"] == "baseline")
+                   & (phases["split"] == split)][
+        ["event_id", "ticker", "split", "start", "end", "complete", "crosses_split",
+         "baseline_overlaps_prev", "baseline_overlaps_any_prev"]].copy()
+    audit.to_csv(out_dir / "baseline_overlap_audit.csv", index=False)
+    eligible = audit[audit["complete"] & ~audit["crosses_split"]]
+    counts["baseline_overlap"] = {
+        "eligible_events": len(eligible),
+        "same_ticker": int(eligible["baseline_overlaps_prev"].sum()),
+        "any_prior_event": int(eligible["baseline_overlaps_any_prev"].sum()),
+    }
+    sens, sens_all, sens_no_prior, nbp = [], [], [], []
     for h, p in panel.groupby("horizon"):
         ec = event_control_losses(p, members, phases)
         sens.append(sensitivity(ec).assign(horizon=h))
+        sens_all.append(sensitivity(ec, overlap_scope="none").assign(horizon=h))
+        sens_no_prior.append(sensitivity(ec, overlap_scope="any_prior").assign(horizon=h))
         nbp.append(no_baseline_post(ec).assign(horizon=h))
     sens, nbp = pd.concat(sens, ignore_index=True), pd.concat(nbp, ignore_index=True)
+    sens_all = pd.concat(sens_all, ignore_index=True)
+    sens_no_prior = pd.concat(sens_no_prior, ignore_index=True)
     sens.to_csv(out_dir / "sensitivity.csv", index=False)
+    sens_all.to_csv(out_dir / "sensitivity_all_baselines.csv", index=False)
+    sens_no_prior.to_csv(out_dir / "sensitivity_no_prior_event_overlap.csv", index=False)
     ew = summary(panel[event_window_rows(panel, phases)])
     ew.to_csv(out_dir / "event_window.csv", index=False)
     hc = horizon_choice(ew)
@@ -76,7 +99,12 @@ def evaluate(pred, data_dir, split, out_dir, alpha=0.10, B=1000, seed=0):
     nbp.to_csv(out_dir / "no_baseline_post.csv", index=False)
     counts["sensitivity_events"] = sens.groupby(["horizon", "phase"])["n_events"].max().rename("n") \
         .reset_index().to_dict("records")
+    counts["sensitivity_events_all_baselines"] = sens_all.groupby(["horizon", "phase"])["n_events"].max().rename("n") \
+        .reset_index().to_dict("records")
+    counts["sensitivity_events_no_prior_event_overlap"] = sens_no_prior.groupby(
+        ["horizon", "phase"])["n_events"].max().rename("n").reset_index().to_dict("records")
     print(f"\n편입 민감도 이벤트 수 (구간별): {counts['sensitivity_events']}")
+    print(f"기준 구간 겹침 (분할·데이터 기간 조건 충족 편입 이벤트): {counts['baseline_overlap']}")
 
     meta = {"split": split, "data_dir": str(data_dir), "created_at": dt.datetime.now().astimezone()
             .isoformat(timespec="seconds"), "git_commit": git_commit(),
