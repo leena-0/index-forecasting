@@ -16,6 +16,8 @@
 속한 연도의 윈도우 모델 하나다 (window). 해를 넘는 부분도 같은 모델의 예측(테스트 다음 해)을 쓴다.
 
 조건 (규칙 3, VARIANTS): 기준 구간은 공통 표본 예측 수가 n_max의 base_min 이상(최소 1개), 나머지 구간은 phase_min개 이상.
+기준 구간이 같은 종목의 이전 이벤트와 겹치면(baseline_overlaps_prev, CLAUDE.md 4.3) 빼고, 포함한 결과는 allow_overlap으로 낸다.
+다른 종목의 이전 이벤트와는 모든 이벤트가 겹치므로(정기변경이 6개월마다 있음) 조건으로 쓰지 않는다.
 공통 표본 예측 수 n = 편입 종목이 평가되고 같은 날 대조군 값도 있는 예측 시점 수.
 """
 import numpy as np
@@ -25,7 +27,9 @@ from src.pipeline.windows import PHASE_ORDER, TEST_YEARS
 
 from .sensitivity import control_flag
 
-VARIANTS = {"main": (0.50, 5), "phase_min_1": (0.50, 1), "base_33": (0.33, 5), "base_any": (0.0, 5)}
+# 이름: (base_min, phase_min, allow_overlap). main = 주 결과, 나머지는 조건을 하나씩만 바꾼 결과
+VARIANTS = {"main": (0.50, 5, False), "phase_min_1": (0.50, 1, False), "base_33": (0.33, 5, False),
+            "base_any": (0.0, 5, False), "with_overlap": (0.50, 5, True)}
 
 
 def target_phases(phases, calendar, h):
@@ -81,10 +85,11 @@ def event_losses(panel, members, control, shifted, events, loss="qlike"):
         n=(loss, "size"), sum_E=(loss, "sum"), sum_C=("L_C", "sum"))
 
 
-def usage(shifted, events, losses, base_min, phase_min):
+def usage(shifted, events, losses, base_min, phase_min, allow_overlap=False):
     """이벤트 × 구간의 사용 여부와 이유. 열: event_id, phase, n, n_max, reason(빈칸이면 사용). 기준 구간 행도 있다."""
     n = losses.groupby(["event_id", "phase"], as_index=False)["n"].min()
-    g = (shifted[shifted["event_id"].isin(events["event_id"])][["event_id", "phase", "complete", "n_max"]]
+    g = (shifted[shifted["event_id"].isin(events["event_id"])][["event_id", "phase", "complete", "n_max",
+                                                                         "baseline_overlaps_prev"]]
          .merge(n, on=["event_id", "phase"], how="left"))
     g["n"] = g["n"].fillna(0).astype(int)
     g = g.merge(events[["event_id", "excluded"]], on="event_id")
@@ -92,6 +97,8 @@ def usage(shifted, events, losses, base_min, phase_min):
     base_reason = pd.Series("", index=base.index)
     base_reason[base["n"] < base_min * base["n_max"]] = "기준 구간 예측 비율 부족"
     base_reason[base["n"] == 0] = "기준 구간 예측 없음"
+    if not allow_overlap:
+        base_reason[base["baseline_overlaps_prev"]] = "기준 구간이 같은 종목의 이전 이벤트와 겹침"
     base_reason[~base["complete"]] = "기준 구간 불완전"
     own = np.select([~g["complete"], g["n_max"] == 0, g["n"] < phase_min],
                     ["구간 불완전", "타깃이 구간에 들어가지 않음", "구간 예측 수 부족"], "")

@@ -39,7 +39,7 @@
 |---|---|
 | `summary.csv`, `summary_by_year.csv` | 이어 붙인 테스트 예측의 평균 QLIKE·MSE (전체, 테스트 연도별) |
 | `dm_h{h}.csv`, `mcs_h{h}.csv` | 이어 붙인 테스트 예측의 DM·MCS |
-| `sensitivity.csv` | 편입 민감도. `variant`: `main`(주 결과), `phase_min_1`·`base_33`·`base_any`(조건을 하나씩 바꾼 결과), `stitched`(이어 붙인 예측). `sens` = 이벤트 평균, `median`, `pooled`(이전 방식), `ci_low`·`ci_high`, `loo_min`·`loo_max`(이벤트를 하나씩 뺐을 때의 범위) |
+| `sensitivity.csv` | 편입 민감도. `variant`: `main`(주 결과), `phase_min_1`·`base_33`·`base_any`·`with_overlap`(조건을 하나씩 바꾼 결과, `with_overlap`은 겹친 기준 구간 포함), `stitched`(이어 붙인 예측). `sens` = 이벤트 평균, `median`, `pooled`(이전 방식), `ci_low`·`ci_high`, `loo_min`·`loo_max`(이벤트를 하나씩 뺐을 때의 범위) |
 | `event_sens.csv`, `leave_one_out.csv` | 주 결과의 이벤트별 민감도, 이벤트를 하나씩 뺐을 때의 변화 (변화가 큰 순) |
 | `exclusions.csv` | variant·h·구간별 이벤트 수와 제외 이유 (이유가 빈칸이면 사용) |
 | `no_baseline_post.csv` | 기준 구간 조건으로 빠진 이벤트의 사후 구간 ln(L^E / L^C) |
@@ -47,6 +47,7 @@
 - **이벤트 모델**: 기준 구간 첫 예측 시점의 연도 윈도우 하나. 해를 넘는 예측은 그 윈도우의 다음 해 예측을 쓴다. 공통 표본은 윈도우마다 따로 구한다.
 - **구간 배정**: 예측 시점 a−1 ~ b−h (타깃이 구간 [a, b] 안). 기준 구간 조건의 분모는 이 개수다 (h = 5는 56, h = 22는 39).
 - **대조군**: 타깃 기간이 어떤 이벤트 윈도우와도 겹치지 않는 구성종목. 예측 시점으로만 판정하면 첫 예측 시점(윈도우 전날)에 편입 종목이 자기 대조군에 들어간다.
+- **기준 구간 겹침**: `event_phases.parquet`의 `baseline_overlaps_prev`(같은 종목)가 True인 이벤트는 주 결과에서 빠지고 `no_baseline_post.csv`로 간다.
 - 아래 2절 5~6번은 이전 고정 분할 평가(`python -m src.evaluate`)의 방식이다.
 
 ## 2. 계산 방식과 가정

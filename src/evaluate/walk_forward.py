@@ -9,7 +9,8 @@
   summary.csv, summary_by_year.csv  이어 붙인 테스트 예측의 평균 손실 (전체, 테스트 연도별)
   dm_h{h}.csv, mcs_h{h}.csv         이어 붙인 테스트 예측의 DM·MCS (QLIKE)
   sensitivity.csv                   편입 민감도 (variant, horizon, phase, model). variant: main = 주 결과,
-                                    phase_min_1·base_33·base_any = 조건을 하나씩 바꾼 결과, stitched = 이어 붙인 예측
+                                    phase_min_1·base_33·base_any·with_overlap = 조건을 하나씩 바꾼 결과,
+                                    stitched = 이어 붙인 예측
   event_sens.csv                    주 결과의 이벤트별 민감도
   leave_one_out.csv                 주 결과에서 이벤트를 하나씩 뺐을 때의 변화
   exclusions.csv                    variant·h·구간별 이벤트 수와 제외 이유 (이유가 빈칸이면 사용)
@@ -85,8 +86,8 @@ def evaluate(preds, data_dir, out_dir, alpha=0.10, B=1000, seed=0):
                                          used[used["window"] == y]) for y, p in by_window.items()], ignore_index=True)
         st_losses = event_losses(stitched, members, control, shifted, used)
         runs = [(v, losses, cfg) for v, cfg in VARIANTS.items()] + [("stitched", st_losses, VARIANTS["main"])]
-        for name, ls, (base_min, phase_min) in runs:
-            use = usage(shifted, events, ls, base_min, phase_min)
+        for name, ls, cfg in runs:
+            use = usage(shifted, events, ls, *cfg)
             es = event_sens(ls, use)
             sens.append(aggregate(es, events, B, seed).assign(variant=name, horizon=h))
             excl.append(use[use["phase"] != "baseline"].groupby(["phase", "reason"]).size().rename("n_events")
@@ -95,7 +96,7 @@ def evaluate(preds, data_dir, out_dir, alpha=0.10, B=1000, seed=0):
                 per_event.append(es.merge(events[["event_id", "ticker", "event_type", "effective", "window"]],
                                           on="event_id").assign(horizon=h))
                 loo.append(leave_one_out(es).assign(horizon=h))
-                nbp.append(no_baseline_post(ls, use, phase_min).assign(horizon=h))
+                nbp.append(no_baseline_post(ls, use, cfg[1]).assign(horizon=h))
     panel = pd.concat(panels, ignore_index=True)
     summary(panel).to_csv(out_dir / "summary.csv", index=False)
     by_year = panel.assign(split=panel["origin_date"].dt.year)

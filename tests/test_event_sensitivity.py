@@ -86,7 +86,8 @@ def losses_table():
 
 
 def shifted_table(n_max=56):
-    return pd.DataFrame([{"event_id": e, "phase": p, "complete": True, "n_max": n_max if p == "baseline" else 18}
+    return pd.DataFrame([{"event_id": e, "phase": p, "complete": True, "baseline_overlaps_prev": False,
+                          "n_max": n_max if p == "baseline" else 18}
                          for e in range(3) for p in ("baseline", "short_shock")])
 
 
@@ -139,6 +140,24 @@ class SensitivityTest(unittest.TestCase):
         self.assertEqual(u[u["phase"] == "short_shock"].set_index("event_id")["reason"].to_dict(),
                          {0: "구간 불완전", 1: "타깃이 구간에 들어가지 않음", 2: "테스트 기간 전에 시작"})
         self.assertTrue(event_sens(ls, u).empty)
+
+    def test_overlapping_baseline(self):
+        ls, sh = losses_table(), shifted_table()
+        sh["baseline_overlaps_prev"] = sh["event_id"] == 1
+        u = usage(sh, EVENTS, ls, 0.5, 5)
+        self.assertEqual(u[u["phase"] == "short_shock"].set_index("event_id")["reason"].to_dict(),
+                         {0: "", 1: "기준 구간이 같은 종목의 이전 이벤트와 겹침", 2: ""})
+        self.assertEqual(sorted(event_sens(ls, u)["event_id"]), [0, 2])
+        self.assertTrue((usage(sh, EVENTS, ls, 0.5, 5, True)["reason"] == "").all())  # 겹침 포함 (견고성)
+        sh.loc[sh["event_id"] == 1, "complete"] = False  # 관찰되지 않은 기준 구간이 먼저다
+        u = usage(sh, EVENTS, ls, 0.5, 5)
+        self.assertEqual(u.loc[u["event_id"] == 1, "reason"].unique().tolist(), ["기준 구간 불완전"])
+
+    def test_variants_change_one_condition(self):
+        main = es_mod.VARIANTS["main"]
+        for name, cfg in es_mod.VARIANTS.items():
+            if name != "main":
+                self.assertEqual(sum(a != b for a, b in zip(main, cfg)), 1, name)
 
     def test_bootstrap_resamples_effective_dates(self):
         v = np.array([[1.0], [3.0], [10.0]])
