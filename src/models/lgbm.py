@@ -6,7 +6,7 @@
 
 - 학습: split == train, embargo == False, log_var가 있는 행. 검증·테스트 구간은 쓰지 않는다.
 - 분산 특성은 로그로 바꾸고, 0 이하·결측은 NaN으로 둔다 — LightGBM이 결측을 따로 분기한다 (보간 없음).
-- 하이퍼파라미터는 고정(PARAMS). 튜닝하지 않았고, 바꾸면 meta.json의 params로 구분한다.
+- 하이퍼파라미터 기본값은 PARAMS. 튜닝은 src.tune(configs/tuning.yaml, 검증 구간)에서 하고, 사용한 값은 meta.json의 params로 구분한다.
 """
 import numpy as np
 import pandas as pd
