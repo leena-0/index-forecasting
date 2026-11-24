@@ -24,8 +24,8 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 | `targets_h{h}.parquet` | `ticker, origin_date, horizon, yz_var, split, embargo` — 종목·거래일마다 다음 h일의 Yang–Zhang 분산 |
 | `features.parquet` | `ticker, date` + 모델 입력 특성 (아래 표). 모델은 `load_panel`로 읽는다 |
 | `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev` |
-| `event_features.parquet` | `ticker, date` + 이벤트 단위 변수 5개 (CLAUDE.md 6.2). `load_panel(..., event_features=True)`로 읽는다 |
 | `members.parquet` | `date, ticker` — 그날의 구성종목. 공통 평가의 대조군에 쓴다 (`docs/EVALUATION.md`) |
+| `event_features.parquet` | `ticker, date` + 이벤트 단위 변수 5개 (CLAUDE.md 6.2). `load_panel(..., event_features=True)`로 읽는다 |
 | `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약, **`reportable: false`와 `hold_reasons`** (구성종목·이벤트가 legacy, 공지 없는 이벤트를 뺌, 임시 공지일 등 최종 결과에 반영하지 않는 이유) |
 
 모델이 쓸 수 있는 예측 행 = `yz_var`가 결측이 아니고 `embargo == False`.
