@@ -35,9 +35,9 @@ def config_id(i, params):
     return f"c{i:02d}_" + "_".join(f"{k}-{v}" for k, v in params.items()) if params else f"c{i:02d}_default"
 
 
-def _init(data_dir, h):
+def _init(data_dir, h, window=None):
     global _PANEL
-    _PANEL = load_panel(data_dir, h)
+    _PANEL = load_panel(data_dir, h, window)
 
 
 def _work(args):
@@ -47,23 +47,24 @@ def _work(args):
     return cid, pred.to_numpy(dtype=np.float32), c, {k: v for k, v in info.items() if k != "train_loss_by_epoch"}
 
 
-def run_configs(model, data_dir, h, configs, seed=0, jobs=1):
+def run_configs(model, data_dir, h, configs, seed=0, jobs=1, window=None):
     """설정마다 (config_id, 예측 log_var 배열, 편향 보정 상수, info). jobs > 1이면 프로세스 병렬."""
     tasks = [(model, config_id(i, p), p, seed) for i, p in enumerate(configs)]
     if jobs <= 1:
-        _init(data_dir, h)
+        _init(data_dir, h, window)
         return [_work(t) for t in tasks]
     from concurrent.futures import ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=jobs, initializer=_init, initargs=(data_dir, h)) as ex:
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_init, initargs=(data_dir, h, window)) as ex:
         return list(ex.map(_work, tasks))
 
 
 def score(panel, phases, results, configs):
-    """설정 × 편향 보정별 검증 구간 지표 표와 평가 행 마스크."""
+    """설정 × 편향 보정별 검증 구간 지표 표와 평가 행 마스크.
+    phases가 None이면(슬라이딩 윈도우 — 이벤트 윈도우가 검증 1년보다 길다) qlike_event는 계산하지 않는다."""
     base = ((panel["split"] == "val") & ~panel["embargo"] & (panel["yz_var"] > 0)).to_numpy().copy()
     for _, pred, _, _ in results:
         base &= np.isfinite(pred)
-    in_event = event_window_rows(panel, phases).to_numpy() & base
+    in_event = np.zeros(len(panel), bool) if phases is None else event_window_rows(panel, phases).to_numpy() & base
     y = panel["yz_var"].to_numpy(dtype=float)
     rows = []
     for (cid, pred, c, info), params in zip(results, configs):

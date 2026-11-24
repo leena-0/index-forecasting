@@ -67,7 +67,7 @@ Open API는 유효한 KRX 당일 기준가를 야간·종가 수익률의 분모
 | `corporate_action.gap_limit` | `0.30` | 이전 5.4 규칙의 가격 기준 변경일 판정(`corp_action`): ratio = 시가/전일 종가가 ratio > 1 + 값 또는 ratio < 1 − 값 (기본 1.3 / 0.7). `openapi`에서는 기준가(CLAUDE.md 5.4)를 쓰므로 **비교·검증용 표시로만 남고 타깃·특성 계산에는 쓰지 않는다** — 8절 |
 | `corporate_action.shares_ratio` | `1.5` | 같은 판정(비교용): 상장주식수가 전일 대비 이 배수 이상(또는 역수 이하)으로 바뀐 날 |
 | `as_of` | `"2024-12-30"` | 데이터 기준일. 이후 데이터는 잘라낸다. 정식 값은 2025년 마지막 거래일이지만 기존 데이터가 2024-12-30까지다 |
-| `split.train_end` | `"2021-12-31"` | 학습 구간 끝 (CLAUDE.md 4.1). 검증 = 2022~2023 (2년, 2026-11-03 팀 합의) |
+| `split.train_end` | `"2021-12-31"` | 이전 고정 분할의 학습 구간 끝. 검증 = 2022~2023. 슬라이딩 윈도우(CLAUDE.md 4.1)는 이 값을 쓰지 않는다 — 아래 2.1 |
 | `split.val_end` | `"2023-12-31"` | 검증 구간 끝. 테스트 = 그다음 날 ~ `as_of` |
 | `horizons` | `[5, 22]` | 예측 기간 h(영업일). 분할 경계마다 h일씩 비운다 |
 | `yang_zhang.demean` | `true` | Yang–Zhang 분산의 평균 처리 — 아래 3절 |
@@ -76,6 +76,15 @@ Open API는 유효한 KRX 당일 기준가를 야간·종가 수익률의 분모
 | `events_path` | `data/raw/events/announcements.csv` | 실제 공지일 CSV (`python -m src.events from-notices`로 생성). 설정하면 기존 구성종목 변화와 일대일 대조한 뒤 실제 공지일을 사용한다. 형식은 `docs/EVENTS.md`. `null`이면 임시 공지일 |
 | `events_missing` | `drop` | 공지일이 없는 이벤트 처리. `error` = 중단(일대일 대응 필수), `drop` = 빼고 진행(건수는 출력·meta·`hold_reasons`에 남김). 구성종목 변화가 없는 공지는 어느 쪽이든 중단 |
 | `out_dir` | `data/dev` | 결과 저장 폴더 (레포 루트 기준) |
+
+### 2.1 슬라이딩 윈도우 (CLAUDE.md 4.1, #50)
+
+`prepare` 결과는 윈도우와 관계없이 하나다. 윈도우별 분할은 패널을 불러올 때 붙인다: `load_panel(data_dir, h, window=2020)` (`windows.assign_window`).
+
+- `split`: 테스트 연도 Y마다 학습 Y−4 ~ Y−2(`train`), 검증 Y−1(`val`), 테스트 Y(`test`), 다음 해 Y+1(`next`), 학습 전(`pre`). 그 뒤 행은 뺀다.
+- `pre` 행은 EWMA 초기값, 시퀀스 입력 창처럼 예측 시점 이전 정보를 쓰는 데만 쓰이고 학습에는 들어가지 않는다.
+- `embargo`: 학습·검증의 마지막 h일, 그리고 타깃 구간이 달력 밖(`as_of` 이후)인 행. 테스트와 다음 해 사이에는 두지 않는다.
+- `targets_h{h}.parquet`과 `event_phases.parquet`의 `split`·`embargo`·`crosses_split`은 이전 고정 분할 값이며 윈도우에서는 쓰지 않는다.
 
 ### 3. `yang_zhang.demean` — n = 5에서의 평균 처리 (CLAUDE.md 5.3)
 
