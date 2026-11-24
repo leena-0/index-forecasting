@@ -1,6 +1,7 @@
 """LightGBM — t일 특성 → 다음 h일 로그 분산 (CLAUDE.md 6.1).
 
     입력 x_t = [ln rv_d, ln rv_w, ln rv_m, ln yz_5, ln yz_22, ret, log_turnover, log_mcap, is_member, n_obs]_t
+             패널에 이벤트 단위 변수(EVENT_FEATURES)가 있으면 더한다
     타깃     = log_var_t = ln(구간 t+1 ~ t+h의 Yang–Zhang 분산)
     손실     = L2 (로그 분산의 제곱오차, CLAUDE.md 5.2 "로그 변환한 분산으로 학습")
 
@@ -10,6 +11,8 @@
 """
 import numpy as np
 import pandas as pd
+
+from src.pipeline.event_features import EVENT_FEATURES
 
 LOG_FEATURES = ["rv_d", "rv_w", "rv_m", "yz_5", "yz_22"]
 RAW_FEATURES = ["ret", "log_turnover", "log_mcap", "is_member", "n_obs"]
@@ -23,7 +26,7 @@ def design(panel):
     x = pd.DataFrame(index=panel.index)
     for c in LOG_FEATURES:
         x[f"ln_{c}"] = np.log(panel[c].where(panel[c] > 0))
-    for c in RAW_FEATURES:
+    for c in RAW_FEATURES + [c for c in EVENT_FEATURES if c in panel]:
         x[c] = panel[c].astype(float)
     return x
 

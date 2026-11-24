@@ -35,9 +35,9 @@ def config_id(i, params):
     return f"c{i:02d}_" + "_".join(f"{k}-{v}" for k, v in params.items()) if params else f"c{i:02d}_default"
 
 
-def _init(data_dir, h, window=None):
+def _init(data_dir, h, window=None, event_features=False):
     global _PANEL
-    _PANEL = load_panel(data_dir, h, window)
+    _PANEL = load_panel(data_dir, h, window, event_features)
 
 
 def _work(args):
@@ -47,14 +47,14 @@ def _work(args):
     return cid, pred.to_numpy(dtype=np.float32), c, {k: v for k, v in info.items() if k != "train_loss_by_epoch"}
 
 
-def run_configs(model, data_dir, h, configs, seed=0, jobs=1, window=None):
+def run_configs(model, data_dir, h, configs, seed=0, jobs=1, window=None, event_features=False):
     """설정마다 (config_id, 예측 log_var 배열, 편향 보정 상수, info). jobs > 1이면 프로세스 병렬."""
     tasks = [(model, config_id(i, p), p, seed) for i, p in enumerate(configs)]
     if jobs <= 1:
-        _init(data_dir, h, window)
+        _init(data_dir, h, window, event_features)
         return [_work(t) for t in tasks]
     from concurrent.futures import ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=jobs, initializer=_init, initargs=(data_dir, h, window)) as ex:
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_init, initargs=(data_dir, h, window, event_features)) as ex:
         return list(ex.map(_work, tasks))
 
 

@@ -6,6 +6,7 @@
 - 엣지: refresh일마다 최근 window거래일 종가 수익률 상관(관측 20일 이상)을 계산하고, t일에는 t 이전 가장 최근
   refresh일의 상관을 쓴다. 각 노드는 그날 노드 중 상관이 큰 상위 k개 이웃과 연결 (이웃이 없으면 자기 특성만).
 - 노드 특성 x = [ln rv_d, ln rv_w, ln rv_m, ret, log_turnover, log_mcap, is_member] (학습 구간 통계로 표준화)
+  패널에 이벤트 단위 변수(EVENT_FEATURES)가 있으면 노드 특성에 더한다 (표준화하지 않음, event_matrix)
 
 모델: GraphSAGE 평균 집계 2층 (Hamilton et al., 2017)
     h¹ = ReLU(W₁ x_i + U₁ mean_{j∈N(i)} x_j),  h² = ReLU(W₂ h¹_i + U₂ mean_{j∈N(i)} h¹_j),  ŷ_i = v·h²_i
@@ -13,6 +14,8 @@
 """
 import numpy as np
 import pandas as pd
+
+from src.pipeline.event_features import event_matrix
 
 NODE_FEATURES = ["rv_d", "rv_w", "rv_m", "ret", "log_turnover", "log_mcap", "is_member"]
 LOG_FEATURES = {"rv_d", "rv_w", "rv_m"}
@@ -24,7 +27,7 @@ def node_features(panel):
     for c in NODE_FEATURES:
         v = panel[c].astype(float)
         cols.append(np.log(v.where(v > 0)) if c in LOG_FEATURES else v)
-    return np.column_stack(cols).astype(np.float32)
+    return np.column_stack(cols + [event_matrix(panel)]).astype(np.float32)
 
 
 def build_graphs(panel, k, window, refresh):
@@ -101,6 +104,7 @@ def fit_predict(panel, seed=0, params=None):
     train_dates = [d for d, (rows, _, _) in graphs.items() if split[rows[0]] == "train"]
     tr_rows = np.concatenate([graphs[d][0] for d in train_dates])
     mu, sd = X[tr_rows].mean(axis=0), X[tr_rows].std(axis=0) + 1e-8
+    mu[len(NODE_FEATURES):], sd[len(NODE_FEATURES):] = 0.0, 1.0  # 이벤트 단위 변수
     Z = (X - mu) / sd
     tr_y = tr_rows[usable[tr_rows]]
     y_mu, y_sd = y[tr_y].mean(), y[tr_y].std()
@@ -136,5 +140,6 @@ def fit_predict(panel, seed=0, params=None):
         for d in graphs:
             x, nb, mask, rows = tensors(d)
             out[rows] = net(x, nb, mask).numpy() * y_sd + y_mu
-    info = {**p, "n_train_dates": len(train_dates), "train_loss_by_epoch": losses, "node_features": NODE_FEATURES}
+    info = {**p, "n_train_dates": len(train_dates), "train_loss_by_epoch": losses, "node_features": NODE_FEATURES,
+            "n_inputs": X.shape[1]}
     return pd.Series(out, index=panel.index), info

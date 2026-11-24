@@ -17,6 +17,8 @@ from . import ewma, garch, gnn, har, lgbm, lstm
 DISPLAY = {"ewma": "EWMA", "har": "HAR", "lgbm": "LightGBM", "lstm": "LSTM",  # 1단계
            "gru": "GRU", "garch": "GARCH", "gnn": "GNN",  # 2단계
            "tcn": "TCN", "transformer": "Transformer"}  # 3단계
+EVENT_MODELS = ("lgbm", "gnn", "lstm", "gru", "tcn", "transformer")  # 이벤트 단위 변수를 받는 모델 (CLAUDE.md 6.2)
+EVENT_SUFFIX = "+EV"  # 이벤트 단위 변수를 넣은 예측의 모델 이름
 DEFAULTS = {"ewma": {"lam": 0.94, "warmup": 22}, "har": {}, "lgbm": dict(lgbm.PARAMS), "lstm": dict(lstm.PARAMS),
             "gru": {**lstm.PARAMS, "arch": "gru"}, "garch": dict(garch.PARAMS), "gnn": dict(gnn.PARAMS),
             "tcn": {**lstm.PARAMS, "arch": "tcn", "layers": 3}, "transformer": {**lstm.PARAMS, "arch": "transformer", "layers": 2}}

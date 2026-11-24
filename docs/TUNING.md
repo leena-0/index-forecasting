@@ -16,6 +16,13 @@
 .venv/Scripts/python -m src.tune --model lgbm --h 5 --window 2020 --out data/tuning_wf --preds data/preds/wf --jobs 4
 ```
 
+이벤트 단위 변수(CLAUDE.md 6.2)를 넣은 쪽은 `--event-features`를 더한다. 6개 모델만 되고, 그리드는 변수가 없을 때와 같다.
+튜닝 폴더는 `{model}_ev_h{h}`, 예측의 모델 이름은 `{모델}+EV`이며 같은 `w{테스트 연도}/`에 함께 저장한다.
+
+```bash
+.venv/Scripts/python -m src.tune --model lgbm --h 5 --window 2020 --event-features --out data/tuning_wf --preds data/preds/wf --jobs 4
+```
+
 | 결과 (git 제외) | 내용 |
 |---|---|
 | `data/tuning/{model}_h{h}/results.csv`, `results.md` | 설정 × 편향 보정별 검증 지표, `qlike_val` 순위 |

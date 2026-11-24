@@ -24,6 +24,7 @@ python -m src.pipeline prepare --config configs/pipeline.yaml  # 설정 파일 �
 | `targets_h{h}.parquet` | `ticker, origin_date, horizon, yz_var, split, embargo` — 종목·거래일마다 다음 h일의 Yang–Zhang 분산 |
 | `features.parquet` | `ticker, date` + 모델 입력 특성 (아래 표). 모델은 `load_panel`로 읽는다 |
 | `event_phases.parquet` | 이벤트 × 5구간: `start, end, complete, reason, split, crosses_split, baseline_overlaps_prev` |
+| `event_features.parquet` | `ticker, date` + 이벤트 단위 변수 5개 (CLAUDE.md 6.2). `load_panel(..., event_features=True)`로 읽는다 |
 | `members.parquet` | `date, ticker` — 그날의 구성종목. 공통 평가의 대조군에 쓴다 (`docs/EVALUATION.md`) |
 | `meta.json` | data_source, as_of, 사용한 config 전체, git commit, 패키지 버전, 건수 요약, **`reportable: false`와 `hold_reasons`** (구성종목·이벤트가 legacy, 공지 없는 이벤트를 뺌, 임시 공지일 등 최종 결과에 반영하지 않는 이유) |
 
@@ -75,6 +76,7 @@ Open API는 유효한 KRX 당일 기준가를 야간·종가 수익률의 분모
 | `placeholder_announce` | `effective` | 공지일이 없을 때 쓰는 임시 공지일. 지금은 편입일만 지원 — 아래 4절 |
 | `events_path` | `data/raw/events/announcements.csv` | 실제 공지일 CSV (`python -m src.events from-notices`로 생성). 설정하면 기존 구성종목 변화와 일대일 대조한 뒤 실제 공지일을 사용한다. 형식은 `docs/EVENTS.md`. `null`이면 임시 공지일 |
 | `events_missing` | `drop` | 공지일이 없는 이벤트 처리. `error` = 중단(일대일 대응 필수), `drop` = 빼고 진행(건수는 출력·meta·`hold_reasons`에 남김). 구성종목 변화가 없는 공지는 어느 쪽이든 중단 |
+| `event_known_from` | 2018-02-09, 2018-06-28 | 이벤트 단위 변수를 쓰기 시작할 공지일 (적용일 → 공지일). 아래 2.2 |
 | `out_dir` | `data/dev` | 결과 저장 폴더 (레포 루트 기준) |
 
 ### 2.1 슬라이딩 윈도우 (CLAUDE.md 4.1, #50)
@@ -85,6 +87,17 @@ Open API는 유효한 KRX 당일 기준가를 야간·종가 수익률의 분모
 - `pre` 행은 EWMA 초기값, 시퀀스 입력 창처럼 예측 시점 이전 정보를 쓰는 데만 쓰이고 학습에는 들어가지 않는다.
 - `embargo`: 학습·검증의 마지막 h일, 그리고 타깃 구간이 달력 밖(`as_of` 이후)인 행. 테스트와 다음 해 사이에는 두지 않는다.
 - `targets_h{h}.parquet`과 `event_phases.parquet`의 `split`·`embargo`·`crosses_split`은 이전 고정 분할 값이며 윈도우에서는 쓰지 않는다.
+
+### 2.2 이벤트 단위 변수의 시점 (CLAUDE.md 6.2, #50)
+
+`src/pipeline/event_features.py`. 공지 다음 거래일부터 쓴다.
+
+- **`event_known_from`**: 공지일 CSV는 같은 적용일의 이벤트에 첫 공지일을 붙인다(`docs/EVENTS.md`). 공지가 여러 건이면 나중 공지의 내용이 미리 반영되므로 변수에는 늦은 공지일을 쓴다.
+  - 2018-02-09: 셀트리온 이전상장. 변경일이 2018-02-07 공지에서 확정됨 (첫 공지 02-06)
+  - 2018-06-28: 공지 2건(06-22, 06-26). 종목별 공지를 구분하는 자료가 없어 늦은 쪽을 씀
+  - 공지 목록에서 같은 적용일에 공지가 2건 이상인 날은 이 이틀뿐이다. 달라지는 행은 10행이다 (개발용). 5구간의 공지일은 바꾸지 않는다.
+- **한계**: 공지됐다가 실시되지 않은 변경은 구성종목이 바뀌지 않아 이벤트 자료에 없다. 2021-05-24에 예정됐다가 2021-05-18에 미실시로 공지된 서부T&D 변경이 그렇다.
+  공지 시점에는 예정된 변경이었으므로 그 기간의 변수는 사후 정보로 0이 된 셈이다. 공지 목록에 원래 공지가 없어 반영할 수 없다. 적용일이 빈 조건부 공지 6건도 변수에 들어가지 않는다.
 
 ### 3. `yang_zhang.demean` — n = 5에서의 평균 처리 (CLAUDE.md 5.3)
 
