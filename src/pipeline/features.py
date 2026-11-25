@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .event_features import EVENT_FEATURES
 from .target import forward_yz
 from .windows import assign_window
 
@@ -72,9 +73,10 @@ def build_features(prices, calendar, members, demean=True):
     return f[["ticker", "date"] + FEATURES]
 
 
-def load_panel(data_dir, h, window=None):
+def load_panel(data_dir, h, window=None, event_features=False):
     """prepare 결과 폴더 → 모델 입력 패널 (특성 + 타깃 + 분할).
     window(테스트 연도)를 주면 고정 분할 대신 그 슬라이딩 윈도우의 split·embargo를 붙인다 (windows.assign_window).
+    event_features=True면 이벤트 단위 변수(EVENT_FEATURES)를 열로 더한다. 모델은 이 열이 있을 때만 입력에 쓴다.
     열: ticker, origin_date, horizon, FEATURES, yz_var, log_var(= ln yz_var, yz_var ≤ 0이면 NaN), split, embargo.
     학습·평가에 쓸 수 있는 행 = log_var가 결측이 아니고 embargo == False."""
     d = Path(data_dir)
@@ -84,4 +86,9 @@ def load_panel(data_dir, h, window=None):
         t = assign_window(t, pd.DatetimeIndex(np.sort(f["origin_date"].unique())), window)
     p = f.merge(t, on=["ticker", "origin_date"], how="inner", validate="one_to_one")
     p["log_var"] = np.log(p["yz_var"].where(p["yz_var"] > 0))
-    return p[["ticker", "origin_date", "horizon"] + FEATURES + ["yz_var", "log_var", "split", "embargo"]]
+    cols = ["ticker", "origin_date", "horizon"] + FEATURES + ["yz_var", "log_var", "split", "embargo"]
+    if event_features:
+        ef = pd.read_parquet(d / "event_features.parquet").rename(columns={"date": "origin_date"})
+        p = p.merge(ef, on=["ticker", "origin_date"], how="left", validate="one_to_one")
+        cols += EVENT_FEATURES
+    return p[cols]

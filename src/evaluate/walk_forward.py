@@ -15,6 +15,8 @@
   leave_one_out.csv                 주 결과에서 이벤트를 하나씩 뺐을 때의 변화
   exclusions.csv                    variant·h·구간별 이벤트 수와 제외 이유 (이유가 빈칸이면 사용)
   no_baseline_post.csv              기준 구간 조건으로 빠진 이벤트의 사후 구간 ln(L^E / L^C)
+  with_events/                      이벤트 단위 변수를 넣은 예측({모델}+EV)이 있을 때: 넣은 것과 뺀 것을 같은 공통 표본으로
+                                    평가한 같은 파일들 + event_feature_effect.csv. 주 결과는 변수 없는 쪽이다 (위 파일들)
   meta.json                         입력·설정·건수, prepare meta의 reportable·hold_reasons
 """
 import argparse
@@ -26,6 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.models.registry import EVENT_SUFFIX
 from src.pipeline.__main__ import git_commit
 from src.pipeline.windows import TEST_YEARS
 
@@ -58,6 +61,26 @@ def years(df, *ys):
 def test_targets(targets):
     """고정 분할의 split·embargo를 지운 타깃. 달력 밖으로 나가는 타깃은 yz_var가 결측이라 빠진다."""
     return targets.assign(split="test", embargo=False)
+
+
+def split_event_preds(preds):
+    """(변수 없는 예측, 모든 예측 또는 None). 변수를 넣은 모델마다 변수 없는 같은 모델이 있어야 한다."""
+    base = {y: p[~p["model"].str.endswith(EVENT_SUFFIX)] for y, p in preds.items()}
+    names = {m for p in preds.values() for m in p["model"].unique()}
+    missing = {m for m in names if m.endswith(EVENT_SUFFIX) and m.removesuffix(EVENT_SUFFIX) not in names}
+    if missing:
+        raise ValueError(f"변수 없는 예측이 없습니다: {sorted(missing)}")
+    return base, (preds if any(m.endswith(EVENT_SUFFIX) for m in names) else None)
+
+
+def event_feature_effect(out_dir, horizons):
+    """같은 모델의 변수 유무 비교: 평균 QLIKE 차이(없음 − 있음, > 0이면 변수를 넣은 쪽의 손실이 작다)와 DM 검정."""
+    rows = []
+    for h in horizons:
+        dm = pd.read_csv(out_dir / f"dm_h{h}.csv")
+        rows.append(dm[dm["model_2"] == dm["model_1"] + EVENT_SUFFIX].assign(horizon=h))
+    t = pd.concat(rows, ignore_index=True).rename(columns={"model_1": "model", "mean_diff": "qlike_without_minus_with"})
+    return t[["horizon", "model", "qlike_without_minus_with", "stat", "p_value", "n"]]
 
 
 def evaluate(preds, data_dir, out_dir, alpha=0.10, B=1000, seed=0):
@@ -139,7 +162,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if not args.final:
         sys.exit("테스트 구간은 한 번만 봅니다 (CLAUDE.md 4.1). 규칙과 튜닝이 끝났으면 --final을 주세요.")
-    evaluate(load_window_preds(REPO / args.preds), REPO / args.data_dir, REPO / args.out, args.alpha, args.B, args.seed)
+    base, both = split_event_preds(load_window_preds(REPO / args.preds))
+    data_dir, out = REPO / args.data_dir, REPO / args.out
+    evaluate(base, data_dir, out, args.alpha, args.B, args.seed)
+    if both is not None:
+        evaluate(both, data_dir, out / "with_events", args.alpha, args.B, args.seed)
+        effect = event_feature_effect(out / "with_events", sorted(both[TEST_YEARS[0]]["horizon"].unique()))
+        effect.to_csv(out / "with_events" / "event_feature_effect.csv", index=False)
 
 
 if __name__ == "__main__":

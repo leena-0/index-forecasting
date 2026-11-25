@@ -1,6 +1,7 @@
 """시퀀스 모델 (LSTM, GRU, TCN, Transformer) — 최근 L거래일의 일별 특성 시퀀스 → 다음 h일 로그 분산 (CLAUDE.md 6.1).
 
     입력 X_t = [z_{t−L+1}, …, z_t],  z_s = [ln rv_d, ret, log_turnover]_s  (학습 구간 평균·표준편차로 표준화)
+    패널에 이벤트 단위 변수(EVENT_FEATURES)가 있으면 시점마다 z_s에 더한다 (표준화하지 않음, event_matrix)
     출력     = Linear(마지막 시점의 은닉 표현) = 예측 log_var_t
     arch     lstm (1단계) · gru (2단계): 순환 셀, hidden = 은닉 크기, layers = 층 수
              tcn (3단계): 인과 팽창 합성곱 (Bai et al., 2018) — 층 i의 팽창 2^i, kernel 크기, 잔차 연결, hidden = 채널
@@ -17,15 +18,17 @@
 import numpy as np
 import pandas as pd
 
+from src.pipeline.event_features import event_matrix
+
 SEQ_FEATURES = ["rv_d", "ret", "log_turnover"]
 PARAMS = {"arch": "lstm", "lookback": 22, "hidden": 32, "layers": 1, "epochs": 5, "batch_size": 1024, "lr": 1e-3,
           "kernel": 3, "heads": 2}
 
 
 def daily_features(panel):
-    """일별 특성 행렬 (n × 3). rv_d는 로그, 0 이하는 NaN."""
+    """일별 특성 행렬 (n × 3, 이벤트 단위 변수가 있으면 n × 8). rv_d는 로그, 0 이하는 NaN."""
     rv = panel["rv_d"].where(panel["rv_d"] > 0)
-    return np.column_stack([np.log(rv), panel["ret"], panel["log_turnover"]]).astype(np.float32)
+    return np.column_stack([np.log(rv), panel["ret"], panel["log_turnover"], event_matrix(panel)]).astype(np.float32)
 
 
 def sequences(panel, lookback):
@@ -46,7 +49,7 @@ def sequences(panel, lookback):
             rows.append(start + lookback - 1 + np.flatnonzero(ok))
         start = i
     if not xs:
-        return np.empty((0, lookback, len(SEQ_FEATURES)), np.float32), np.empty(0, int)
+        return np.empty((0, lookback, z.shape[1]), np.float32), np.empty(0, int)
     return np.concatenate(xs), np.concatenate(rows)
 
 
@@ -138,6 +141,7 @@ def fit_predict(panel, seed=0, params=None):
     is_tr = ((panel["split"].to_numpy()[rows] == "train") & ~panel["embargo"].to_numpy()[rows] & np.isfinite(y))
     mu = X[is_tr].reshape(-1, X.shape[2]).mean(axis=0)
     sd = X[is_tr].reshape(-1, X.shape[2]).std(axis=0) + 1e-8
+    mu[len(SEQ_FEATURES):], sd[len(SEQ_FEATURES):] = 0.0, 1.0  # 이벤트 단위 변수
     X = (X - mu) / sd
     y_mu, y_sd = y[is_tr].mean(), y[is_tr].std()
 
@@ -167,5 +171,5 @@ def fit_predict(panel, seed=0, params=None):
     pred = pd.Series(np.nan, index=panel.index)
     pred.iloc[rows] = out * y_sd + y_mu
     info = {**p, "n_train": int(is_tr.sum()), "train_loss_by_epoch": [round(v, 5) for v in losses],
-            "seq_features": SEQ_FEATURES}
+            "seq_features": SEQ_FEATURES, "n_inputs": X.shape[2]}
     return pred, info

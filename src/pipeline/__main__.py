@@ -7,6 +7,7 @@
   features.parquet       ticker, date, 모델 입력 특성 (features.py, 불러오기는 features.load_panel)
   event_phases.parquet   이벤트 × 구간 (complete, reason, split, crosses_split, baseline_overlaps_prev, baseline_overlaps_any_prev)
   members.parquet        date, ticker — 그날의 구성종목 (평가의 대조군, src.evaluate)
+  event_features.parquet ticker, date, 이벤트 단위 변수 (event_features.py, load_panel(event_features=True))
   meta.json              data_source, as_of, config, git commit, 패키지 버전, 건수 요약
 """
 import argparse
@@ -25,6 +26,7 @@ from dotenv import load_dotenv
 from src.events import load_announcements, reconcile_events
 
 from . import legacy, openapi
+from .event_features import build_event_features
 from .features import build_features
 from .target import forward_yz
 from .windows import assign_splits, event_phases, summarize
@@ -136,6 +138,11 @@ def prepare(cfg):
     feats.to_parquet(out_dir / "features.parquet", index=False)
     counts["features_nan"] = feats.drop(columns=["ticker", "date"]).isna().sum().to_dict()
     print(f"특성 {len(feats)}행, 결측 {counts['features_nan']}")
+
+    ef = build_event_features(feats[["ticker", "date"]], events, cal, cfg.get("event_known_from"))
+    ef.to_parquet(out_dir / "event_features.parquet", index=False)
+    counts["event_feature_rows"] = int(ef["event_active"].sum())
+    print(f"이벤트 변수가 있는 행 {counts['event_feature_rows']} / {len(ef)}")
 
     ph = event_phases(events, cal, prices, cfg["event_phases"], cfg["split"])
     ph.to_parquet(out_dir / "event_phases.parquet", index=False)

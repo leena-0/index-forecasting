@@ -4,6 +4,8 @@
 
 --window(테스트 연도)를 주면 그 슬라이딩 윈도우의 학습·검증 구간으로 튜닝하고 (CLAUDE.md 4.1), 결과 폴더 밑에
 w{테스트 연도}/를 만들어 저장한다. 예측 테이블에는 검증·테스트·다음 해(next) 행만 넣는다.
+--event-features를 주면 이벤트 단위 변수를 입력에 더해 튜닝한다 (CLAUDE.md 6.2). 튜닝 폴더는 {model}_ev_h{h}, 예측의 모델
+이름은 {모델}+EV다. 그리드는 변수가 없을 때와 같다.
 
 결과 (git 제외):
   data/tuning/{model}_h{h}/results.csv     설정 × 편향 보정별 검증 지표 (qlike_val 순위)
@@ -43,17 +45,20 @@ def to_markdown(table):
     return "\n".join(lines) + "\n"
 
 
-def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1, window=None):
+def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1, window=None,
+         event_features=False):
+    if event_features and model not in registry.EVENT_MODELS:
+        raise ValueError(f"이벤트 단위 변수를 받지 않는 모델입니다: {model}")
     configs = expand(grid)
     if window is not None:
         out_root, preds_dir = out_root / f"w{window}", preds_dir / f"w{window}"
-    print(f"[tune] {model} h={h} window={window}: 설정 {len(configs)}개 × 편향 보정 2가지, jobs={jobs}")
-    results = run_configs(model, data_dir, h, configs, seed, jobs, window)
-    panel = load_panel(data_dir, h, window)
+    print(f"[tune] {model} h={h} window={window} event_features={event_features}: 설정 {len(configs)}개 × 편향 보정 2가지, jobs={jobs}")
+    results = run_configs(model, data_dir, h, configs, seed, jobs, window, event_features)
+    panel = load_panel(data_dir, h, window, event_features)
     phases = pd.read_parquet(data_dir / "event_phases.parquet") if window is None else None
     table, mask = score(panel, phases, results, configs)
 
-    out = out_root / f"{model}_h{h}"
+    out = out_root / f"{model}{'_ev' if event_features else ''}_h{h}"
     (out / "val_preds").mkdir(parents=True, exist_ok=True)
     keys = panel.loc[mask, ["ticker", "origin_date"]].reset_index(drop=True)
     for cid, pred, c, _ in results:
@@ -70,13 +75,13 @@ def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1, window=N
     i = [r[0] for r in results].index(best["config_id"])
     cid, pred, c, info = results[i]
     lv = pred.astype(float) + (c if best["smearing"] else 0.0)
-    name = registry.DISPLAY[model]
+    name = registry.DISPLAY[model] + (registry.EVENT_SUFFIX if event_features else "")
     tbl = prediction_table(panel, lv, name, seed=seed, version=git_commit())
     if window is not None:  # 학습 구간과 그 전의 예측은 평가에 쓰지 않는다
         tbl = tbl[tbl["origin_date"].dt.year >= window - 1].reset_index(drop=True)
     preds_dir.mkdir(parents=True, exist_ok=True)
     tbl.to_parquet(preds_dir / f"{name}_h{h}.parquet", index=False)
-    meta = {"model": name, "horizon": h, "window": window, "selected_by": "min qlike_val (검증 구간)", "config_id": cid,
+    meta = {"model": name, "horizon": h, "window": window, "event_features": event_features, "selected_by": "min qlike_val (검증 구간)", "config_id": cid,
             "params": json.loads(best["params"]), "smearing": bool(best["smearing"]), "smearing_c": c,
             "val": {k: best[k] for k in ["qlike_val", "mse_val", "qlike_event", "n_val", "n_event"]},
             "info": info, "seed": seed, "git_commit": git_commit(), "data_dir": str(data_dir),
@@ -95,6 +100,7 @@ def main(argv=None):
     ap.add_argument("--model", choices=sorted(registry.DISPLAY), required=True)
     ap.add_argument("--h", type=int, choices=[5, 22], required=True)
     ap.add_argument("--window", type=int, choices=TEST_YEARS, default=None, help="슬라이딩 윈도우의 테스트 연도")
+    ap.add_argument("--event-features", action="store_true", help="이벤트 단위 변수를 입력에 더함")
     ap.add_argument("--grid", default=str(REPO / "configs" / "tuning.yaml"))
     ap.add_argument("--data-dir", default="data/dev")
     ap.add_argument("--out", default="data/tuning")
@@ -105,7 +111,7 @@ def main(argv=None):
     with open(args.grid, encoding="utf-8") as f:
         grid = (yaml.safe_load(f) or {}).get(args.model) or {}
     tune(args.model, args.h, REPO / args.data_dir, grid, REPO / args.out, REPO / args.preds, args.seed, args.jobs,
-         args.window)
+         args.window, args.event_features)
 
 
 if __name__ == "__main__":
