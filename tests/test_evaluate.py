@@ -152,6 +152,23 @@ class SensitivityTest(unittest.TestCase):
         nb = no_baseline_post(ec)
         self.assertAlmostEqual(nb.iloc[0]["log_ratio"], math.log(2.0 / 1.0))
 
+    def test_overlapping_baseline_excluded_from_primary_sensitivity(self):
+        ph = self.phases.copy()
+        ph["baseline_overlaps_prev"] = ph["event_id"] == 0
+        ph["baseline_overlaps_any_prev"] = ph["event_id"] == 0
+        ec = event_control_losses(self.panel, self.members, ph)
+        self.assertTrue(sensitivity(ec).empty)
+        self.assertFalse(sensitivity(ec, overlap_scope="none").empty)
+        self.assertFalse(no_baseline_post(ec).empty)
+
+    def test_other_ticker_overlap_is_separate_robustness_case(self):
+        ph = self.phases.copy()
+        ph["baseline_overlaps_prev"] = False
+        ph["baseline_overlaps_any_prev"] = ph["event_id"] == 0
+        ec = event_control_losses(self.panel, self.members, ph)
+        self.assertFalse(sensitivity(ec).empty)
+        self.assertTrue(sensitivity(ec, overlap_scope="any_prior").empty)
+
 
 class CliTest(unittest.TestCase):
     def test_test_split_needs_final(self):

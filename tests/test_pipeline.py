@@ -203,6 +203,24 @@ class EventPhaseTest(unittest.TestCase):
         self.assertFalse(ph.loc[(0, "baseline"), "baseline_overlaps_prev"])
         self.assertTrue(ph.loc[(1, "baseline"), "baseline_overlaps_prev"])
         self.assertFalse(ph.loc[(2, "baseline"), "baseline_overlaps_prev"])
+        self.assertTrue(ph.loc[(2, "baseline"), "baseline_overlaps_any_prev"])
+
+    def test_overlap_requires_actual_intersection_and_uses_effective_date(self):
+        # 이벤트 ID가 날짜 순서와 반대여도 이전 이벤트를 올바르게 찾는다.
+        ph = self.phases([("A", self.cal[340], self.cal[340], "placeholder"),  # 기준 220~279: 겹침 없음
+                          ("A", self.cal[365], self.cal[365], "placeholder"),  # 기준 245~304: 300일 충격과 300~304 겹침
+                          ("A", self.cal[300], self.cal[300], "placeholder"),  # 이전 이벤트, ID는 가장 큼
+                          ("B", self.cal[365], self.cal[365], "placeholder")])
+        self.assertFalse(ph.loc[(0, "baseline"), "baseline_overlaps_prev"])
+        self.assertTrue(ph.loc[(1, "baseline"), "baseline_overlaps_prev"])
+        self.assertFalse(ph.loc[(3, "baseline"), "baseline_overlaps_prev"])
+        self.assertTrue(ph.loc[(3, "baseline"), "baseline_overlaps_any_prev"])
+
+    def test_baseline_can_overlap_only_prior_post(self):
+        ph = self.phases([("A", self.cal[300], self.cal[300], "placeholder"),
+                          ("A", self.cal[442], self.cal[442], "placeholder")])
+        # 두 번째 기준 구간 322~381은 첫 충격 300~321 직후부터 시작한다.
+        self.assertTrue(ph.loc[(1, "baseline"), "baseline_overlaps_prev"])
 
 
 def make_legacy(d):
