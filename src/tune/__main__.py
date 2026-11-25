@@ -1,6 +1,9 @@
 """검증 구간 하이퍼파라미터 튜닝 (docs/TUNING.md).
 
-    python -m src.tune --model lgbm --h 5 [--grid configs/tuning.yaml] [--data-dir data/dev] [--jobs 4]
+    python -m src.tune --model lgbm --h 5 [--window 2020] [--grid configs/tuning.yaml] [--data-dir data/dev] [--jobs 4]
+
+--window(테스트 연도)를 주면 그 슬라이딩 윈도우의 학습·검증 구간으로 튜닝하고 (CLAUDE.md 4.1), 결과 폴더 밑에
+w{테스트 연도}/를 만들어 저장한다. 예측 테이블에는 검증·테스트·다음 해(next) 행만 넣는다.
 
 결과 (git 제외):
   data/tuning/{model}_h{h}/results.csv     설정 × 편향 보정별 검증 지표 (qlike_val 순위)
@@ -22,6 +25,7 @@ from src.models import registry
 from src.models.__main__ import prediction_table
 from src.pipeline.__main__ import git_commit
 from src.pipeline.features import load_panel
+from src.pipeline.windows import TEST_YEARS
 
 from .runner import expand, run_configs, score
 
@@ -39,12 +43,14 @@ def to_markdown(table):
     return "\n".join(lines) + "\n"
 
 
-def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1):
+def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1, window=None):
     configs = expand(grid)
-    print(f"[tune] {model} h={h}: 설정 {len(configs)}개 × 편향 보정 2가지, jobs={jobs}")
-    results = run_configs(model, data_dir, h, configs, seed, jobs)
-    panel = load_panel(data_dir, h)
-    phases = pd.read_parquet(data_dir / "event_phases.parquet")
+    if window is not None:
+        out_root, preds_dir = out_root / f"w{window}", preds_dir / f"w{window}"
+    print(f"[tune] {model} h={h} window={window}: 설정 {len(configs)}개 × 편향 보정 2가지, jobs={jobs}")
+    results = run_configs(model, data_dir, h, configs, seed, jobs, window)
+    panel = load_panel(data_dir, h, window)
+    phases = pd.read_parquet(data_dir / "event_phases.parquet") if window is None else None
     table, mask = score(panel, phases, results, configs)
 
     out = out_root / f"{model}_h{h}"
@@ -54,7 +60,8 @@ def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1):
         keys.assign(pred_log_var=pred[mask], pred_log_var_smeared=pred[mask] + c).to_parquet(
             out / "val_preds" / f"{cid}.parquet", index=False)
     prep_meta = json.loads((data_dir / "meta.json").read_text(encoding="utf-8"))
-    header = (f"# {registry.DISPLAY[model]} h={h} 튜닝 (검증 구간, {prep_meta.get('config', {}).get('split')})\n\n"
+    split = prep_meta.get("config", {}).get("split") if window is None else f"슬라이딩 윈도우, 테스트 {window}"
+    header = (f"# {registry.DISPLAY[model]} h={h} 튜닝 (검증 구간, {split})\n\n"
               f"개발용 — reportable={prep_meta.get('reportable')}, hold_reasons={prep_meta.get('hold_reasons')}\n\n")
     table.to_csv(out / "results.csv", index=False)
     (out / "results.md").write_text(header + to_markdown(table), encoding="utf-8")
@@ -65,9 +72,11 @@ def tune(model, h, data_dir, grid, out_root, preds_dir, seed=0, jobs=1):
     lv = pred.astype(float) + (c if best["smearing"] else 0.0)
     name = registry.DISPLAY[model]
     tbl = prediction_table(panel, lv, name, seed=seed, version=git_commit())
+    if window is not None:  # 학습 구간과 그 전의 예측은 평가에 쓰지 않는다
+        tbl = tbl[tbl["origin_date"].dt.year >= window - 1].reset_index(drop=True)
     preds_dir.mkdir(parents=True, exist_ok=True)
     tbl.to_parquet(preds_dir / f"{name}_h{h}.parquet", index=False)
-    meta = {"model": name, "horizon": h, "selected_by": "min qlike_val (검증 구간)", "config_id": cid,
+    meta = {"model": name, "horizon": h, "window": window, "selected_by": "min qlike_val (검증 구간)", "config_id": cid,
             "params": json.loads(best["params"]), "smearing": bool(best["smearing"]), "smearing_c": c,
             "val": {k: best[k] for k in ["qlike_val", "mse_val", "qlike_event", "n_val", "n_event"]},
             "info": info, "seed": seed, "git_commit": git_commit(), "data_dir": str(data_dir),
@@ -85,6 +94,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m src.tune")
     ap.add_argument("--model", choices=sorted(registry.DISPLAY), required=True)
     ap.add_argument("--h", type=int, choices=[5, 22], required=True)
+    ap.add_argument("--window", type=int, choices=TEST_YEARS, default=None, help="슬라이딩 윈도우의 테스트 연도")
     ap.add_argument("--grid", default=str(REPO / "configs" / "tuning.yaml"))
     ap.add_argument("--data-dir", default="data/dev")
     ap.add_argument("--out", default="data/tuning")
@@ -94,7 +104,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     with open(args.grid, encoding="utf-8") as f:
         grid = (yaml.safe_load(f) or {}).get(args.model) or {}
-    tune(args.model, args.h, REPO / args.data_dir, grid, REPO / args.out, REPO / args.preds, args.seed, args.jobs)
+    tune(args.model, args.h, REPO / args.data_dir, grid, REPO / args.out, REPO / args.preds, args.seed, args.jobs,
+         args.window)
 
 
 if __name__ == "__main__":

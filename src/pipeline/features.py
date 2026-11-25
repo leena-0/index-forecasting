@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from .target import forward_yz
+from .windows import assign_window
 
 FEATURES = ["rv_d", "rv_w", "rv_m", "yz_5", "yz_22", "ret", "log_turnover", "log_mcap", "is_member", "n_obs"]
 
@@ -71,13 +72,16 @@ def build_features(prices, calendar, members, demean=True):
     return f[["ticker", "date"] + FEATURES]
 
 
-def load_panel(data_dir, h):
+def load_panel(data_dir, h, window=None):
     """prepare 결과 폴더 → 모델 입력 패널 (특성 + 타깃 + 분할).
+    window(테스트 연도)를 주면 고정 분할 대신 그 슬라이딩 윈도우의 split·embargo를 붙인다 (windows.assign_window).
     열: ticker, origin_date, horizon, FEATURES, yz_var, log_var(= ln yz_var, yz_var ≤ 0이면 NaN), split, embargo.
     학습·평가에 쓸 수 있는 행 = log_var가 결측이 아니고 embargo == False."""
     d = Path(data_dir)
     f = pd.read_parquet(d / "features.parquet").rename(columns={"date": "origin_date"})
     t = pd.read_parquet(d / f"targets_h{h}.parquet")
+    if window is not None:
+        t = assign_window(t, pd.DatetimeIndex(np.sort(f["origin_date"].unique())), window)
     p = f.merge(t, on=["ticker", "origin_date"], how="inner", validate="one_to_one")
     p["log_var"] = np.log(p["yz_var"].where(p["yz_var"] > 0))
     return p[["ticker", "origin_date", "horizon"] + FEATURES + ["yz_var", "log_var", "split", "embargo"]]
